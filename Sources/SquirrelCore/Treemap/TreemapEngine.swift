@@ -51,11 +51,12 @@ public struct TreemapEngine {
             rootTotalSize += catSize
 
             // Sub-group largest items / subfolders within category
-            let topItems = catItems
-                .sorted { $0.allocatedSize > $1.allocatedSize }
-                .prefix(25) // Top 25 largest items per category to keep UI crisp
+            let sortedItems = catItems.sorted { $0.allocatedSize > $1.allocatedSize }
+            let topCount = min(30, sortedItems.count)
+            let topItems = Array(sortedItems.prefix(topCount))
+            let topItemsSize = topItems.reduce(0) { $0 + $1.allocatedSize }
 
-            let childNodes = topItems.map { item in
+            var childNodes = topItems.map { item in
                 TreemapNode(
                     name: item.name,
                     path: item.path,
@@ -64,6 +65,23 @@ public struct TreemapEngine {
                     isDirectory: item.isDirectory,
                     children: []
                 )
+            }
+
+            // Account for any remaining items in category so 100% of bytes are represented
+            if catSize > topItemsSize && sortedItems.count > topCount {
+                let remainderSize = catSize - topItemsSize
+                if remainderSize >= 1024 {
+                    childNodes.append(
+                        TreemapNode(
+                            name: "Other \(sortedItems.count - topCount) Items",
+                            path: "\(category.rawValue)/Other",
+                            size: remainderSize,
+                            category: category,
+                            isDirectory: true,
+                            children: []
+                        )
+                    )
+                }
             }
 
             let catNode = TreemapNode(
@@ -90,6 +108,7 @@ public struct TreemapEngine {
     }
 
     /// Computes squarified bounding rectangles for children inside the given canvas bounds.
+    /// Recursively computes nested bounding boxes for children within parent groups when space permits.
     public static func layoutSquarified(node: inout TreemapNode, bounds: CGRect) {
         node.rect = bounds
         guard !node.children.isEmpty, bounds.width > 0, bounds.height > 0 else { return }
@@ -127,6 +146,23 @@ public struct TreemapEngine {
 
         if !currentSlice.isEmpty {
             layoutRow(slice: currentSlice, weights: normalizedWeights, bounds: &remainingBounds, children: &children)
+        }
+
+        // Recursively layout inner children inside category/folder rectangles if space allows
+        for i in 0..<children.count {
+            if !children[i].children.isEmpty && children[i].rect.width >= 70 && children[i].rect.height >= 56 {
+                let headerHeight: CGFloat = 24.0
+                let padding: CGFloat = 3.0
+                let inner = CGRect(
+                    x: children[i].rect.minX + padding,
+                    y: children[i].rect.minY + headerHeight + padding,
+                    width: max(0, children[i].rect.width - (padding * 2)),
+                    height: max(0, children[i].rect.height - headerHeight - (padding * 2))
+                )
+                if inner.width > 24 && inner.height > 24 {
+                    layoutSquarified(node: &children[i], bounds: inner)
+                }
+            }
         }
 
         node.children = children

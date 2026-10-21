@@ -96,26 +96,109 @@ public struct TreemapView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                         } else {
                             ForEach(computedRoot.children) { child in
-                                TreemapTileView(
-                                    node: child,
-                                    isSelected: appState.selectedTreemapNode?.id == child.id,
-                                    isHovered: appState.hoveredTreemapNodeId == child.id,
-                                    onSelect: {
-                                        appState.selectedTreemapNode = child
-                                    },
-                                    onDrillDown: {
-                                        appState.drillDownTreemap(to: child)
-                                    }
-                                )
-                                .frame(width: max(0, child.rect.width), height: max(0, child.rect.height))
-                                .offset(x: child.rect.minX, y: child.rect.minY)
-                                .onHover { hovering in
-                                    if hovering {
-                                        if appState.hoveredTreemapNodeId != child.id {
-                                            appState.hoveredTreemapNodeId = child.id
+                                let hasNestedChildren = !child.children.isEmpty && (child.children.first?.rect.width ?? 0) > 0
+
+                                if hasNestedChildren {
+                                    // Group Container Background & Header
+                                    ZStack(alignment: .topLeading) {
+                                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                            .fill(SquirrelTheme.color(for: child.category).opacity(0.06))
+                                            .overlay(
+                                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                                    .stroke(
+                                                        appState.selectedTreemapNode?.id == child.id ? Color.accentColor : SquirrelTheme.color(for: child.category).opacity(0.3),
+                                                        lineWidth: appState.selectedTreemapNode?.id == child.id ? 2.0 : 1.0
+                                                    )
+                                            )
+
+                                        HStack(spacing: 6) {
+                                            Circle()
+                                                .fill(SquirrelTheme.color(for: child.category))
+                                                .frame(width: 8, height: 8)
+
+                                            Text(child.name)
+                                                .font(.system(size: 11, weight: .bold))
+                                                .lineLimit(1)
+
+                                            Text("• \(ByteCountFormatter.string(fromByteCount: child.size, countStyle: .file))")
+                                                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                                                .foregroundColor(.secondary)
+
+                                            Text("(\(child.children.count) items)")
+                                                .font(.system(size: 10))
+                                                .foregroundColor(.secondary)
+
+                                            Spacer()
+
+                                            Button(action: {
+                                                appState.drillDownTreemap(to: child)
+                                            }) {
+                                                HStack(spacing: 3) {
+                                                    Text("Drill Down")
+                                                    Image(systemName: "chevron.right")
+                                                }
+                                                .font(.system(size: 9, weight: .semibold))
+                                                .foregroundColor(.accentColor)
+                                            }
+                                            .buttonStyle(.plain)
                                         }
-                                    } else {
-                                        if appState.hoveredTreemapNodeId == child.id {
+                                        .padding(.horizontal, 8)
+                                        .frame(width: max(0, child.rect.width), height: 24, alignment: .leading)
+                                        .contentShape(Rectangle())
+                                        .onTapGesture {
+                                            appState.selectedTreemapNode = child
+                                        }
+                                    }
+                                    .frame(width: max(0, child.rect.width), height: max(0, child.rect.height))
+                                    .offset(x: child.rect.minX, y: child.rect.minY)
+
+                                    // Inner child tiles
+                                    ForEach(child.children) { innerChild in
+                                        if innerChild.rect.width > 2 && innerChild.rect.height > 2 {
+                                            TreemapTileView(
+                                                node: innerChild,
+                                                isSelected: appState.selectedTreemapNode?.id == innerChild.id,
+                                                isHovered: appState.hoveredTreemapNodeId == innerChild.id,
+                                                onSelect: {
+                                                    appState.selectedTreemapNode = innerChild
+                                                },
+                                                onDrillDown: {
+                                                    appState.drillDownTreemap(to: innerChild)
+                                                }
+                                            )
+                                            .frame(width: max(0, innerChild.rect.width), height: max(0, innerChild.rect.height))
+                                            .offset(x: innerChild.rect.minX, y: innerChild.rect.minY)
+                                            .onHover { hovering in
+                                                if hovering {
+                                                    if appState.hoveredTreemapNodeId != innerChild.id {
+                                                        appState.hoveredTreemapNodeId = innerChild.id
+                                                    }
+                                                } else if appState.hoveredTreemapNodeId == innerChild.id {
+                                                    appState.hoveredTreemapNodeId = nil
+                                                }
+                                            }
+                                        }
+                                    }
+                                } else {
+                                    TreemapTileView(
+                                        node: child,
+                                        isSelected: appState.selectedTreemapNode?.id == child.id,
+                                        isHovered: appState.hoveredTreemapNodeId == child.id,
+                                        onSelect: {
+                                            appState.selectedTreemapNode = child
+                                        },
+                                        onDrillDown: {
+                                            appState.drillDownTreemap(to: child)
+                                        }
+                                    )
+                                    .frame(width: max(0, child.rect.width), height: max(0, child.rect.height))
+                                    .offset(x: child.rect.minX, y: child.rect.minY)
+                                    .onHover { hovering in
+                                        if hovering {
+                                            if appState.hoveredTreemapNodeId != child.id {
+                                                appState.hoveredTreemapNodeId = child.id
+                                            }
+                                        } else if appState.hoveredTreemapNodeId == child.id {
                                             appState.hoveredTreemapNodeId = nil
                                         }
                                     }
@@ -129,7 +212,7 @@ public struct TreemapView: View {
                 // Selected Item Inspector Sidebar
                 if let selected = appState.selectedTreemapNode {
                     TreemapInspectorView(node: selected, appState: appState)
-                        .frame(minWidth: 280, maxWidth: 360)
+                        .frame(minWidth: 320, idealWidth: 340, maxWidth: 420)
                 }
             }
         }
@@ -153,71 +236,103 @@ struct TreemapTileView: View {
     let onSelect: () -> Void
     let onDrillDown: () -> Void
 
+    private var tileBaseColor: Color {
+        let base = SquirrelTheme.color(for: node.category)
+        let hashOffset = Double(abs(node.name.hashValue) % 7) - 3.0
+        let opacity = max(0.74, min(0.98, 0.88 + (hashOffset * 0.03)))
+        return base.opacity(opacity)
+    }
+
+    private var fileIconName: String {
+        if node.isDirectory {
+            return "folder.fill"
+        }
+        let lower = node.name.lowercased()
+        if lower.hasSuffix(".dmg") || lower.hasSuffix(".iso") {
+            return "externaldrive.fill"
+        } else if lower.hasSuffix(".pkg") || lower.hasSuffix(".xip") || lower.hasSuffix(".zip") || lower.hasSuffix(".tar.gz") {
+            return "shippingbox.fill"
+        } else if lower.hasSuffix(".app") {
+            return "app.fill"
+        } else if lower.hasSuffix(".mp4") || lower.hasSuffix(".mov") || lower.hasSuffix(".mkv") {
+            return "film.fill"
+        } else if lower.hasSuffix(".pdf") {
+            return "doc.richtext.fill"
+        } else if lower.hasSuffix(".log") {
+            return "doc.text.fill"
+        } else {
+            return "doc.fill"
+        }
+    }
+
     var body: some View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
-                .fill(
-                    SquirrelTheme.color(for: node.category)
-                )
+                .fill(tileBaseColor)
                 .overlay(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .stroke(
-                            isSelected ? Color.white : (isHovered ? Color.white.opacity(0.8) : Color.black.opacity(0.15)),
+                            isSelected ? Color.white : (isHovered ? Color.white.opacity(0.9) : Color.black.opacity(0.18)),
                             lineWidth: isSelected ? 2.5 : (isHovered ? 1.5 : 0.8)
                         )
                 )
 
-            if node.rect.width > 54 && node.rect.height > 32 {
+            if node.rect.width > 42 && node.rect.height > 24 {
                 VStack(alignment: .leading, spacing: 2) {
-                    HStack(spacing: 4) {
+                    HStack(spacing: 3) {
+                        Image(systemName: fileIconName)
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundColor(.white.opacity(0.9))
+
                         Text(node.name)
                             .font(.system(size: 11, weight: .bold))
                             .lineLimit(1)
                             .foregroundColor(.white)
-                            .shadow(color: Color.black.opacity(0.5), radius: 1, x: 0, y: 1)
-
-                        if !node.children.isEmpty && node.rect.width > 90 {
-                            Image(systemName: "arrow.down.right.and.arrow.up.left")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundColor(.white.opacity(0.85))
-                        }
+                            .shadow(color: Color.black.opacity(0.6), radius: 1, x: 0, y: 1)
                     }
 
-                    if node.rect.height > 46 {
+                    if node.rect.height > 40 {
                         Text(ByteCountFormatter.string(fromByteCount: node.size, countStyle: .file))
                             .font(.system(size: 10, weight: .semibold).monospacedDigit())
                             .foregroundColor(.white.opacity(0.95))
-                            .shadow(color: Color.black.opacity(0.5), radius: 1, x: 0, y: 1)
+                            .shadow(color: Color.black.opacity(0.6), radius: 1, x: 0, y: 1)
                     }
 
-                    if !node.children.isEmpty && node.rect.height > 70 && node.rect.width > 110 {
+                    if node.isDirectory && node.rect.height > 64 && node.rect.width > 90 {
                         Text("Double-click to open")
                             .font(.system(size: 9, weight: .medium))
                             .foregroundColor(.white.opacity(0.8))
-                            .padding(.top, 2)
+                            .padding(.top, 1)
                     }
                 }
-                .padding(6)
+                .padding(5)
             }
         }
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
-            if !node.children.isEmpty {
+            if node.isDirectory && !node.children.isEmpty {
                 onDrillDown()
+            } else if FileManager.default.fileExists(atPath: node.path) {
+                NSWorkspace.shared.selectFile(node.path, inFileViewerRootedAtPath: "")
             }
         }
         .onTapGesture(count: 1) {
             onSelect()
         }
+        .help("\(node.name) — \(ByteCountFormatter.string(fromByteCount: node.size, countStyle: .file))\n\(node.path)")
         .contextMenu {
             Button("Inspect Item") { onSelect() }
-            if !node.children.isEmpty {
+            if node.isDirectory && !node.children.isEmpty {
                 Button("Drill Down into \(node.name)") { onDrillDown() }
             }
             if FileManager.default.fileExists(atPath: node.path) {
                 Button("Reveal in Finder") {
                     NSWorkspace.shared.selectFile(node.path, inFileViewerRootedAtPath: "")
                 }
+            }
+            Button("Copy Path") {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(node.path, forType: .string)
             }
         }
     }
@@ -250,14 +365,24 @@ struct TreemapInspectorView: View {
 
                 Divider()
 
-                VStack(alignment: .leading, spacing: 10) {
+                VStack(alignment: .leading, spacing: 12) {
                     Text("METRICS & METADATA")
                         .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.secondary)
 
                     InspectorRow(label: "Allocated Size", value: ByteCountFormatter.string(fromByteCount: node.size, countStyle: .file))
                     InspectorRow(label: "Item Type", value: node.isDirectory ? "Directory / Bundle" : "Regular File")
-                    InspectorRow(label: "Filesystem Path", value: node.path)
+
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("FILESYSTEM PATH")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.secondary)
+                        Text(node.path)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(.primary)
+                            .lineLimit(4)
+                            .textSelection(.enabled)
+                    }
                 }
 
                 Divider()
@@ -271,13 +396,21 @@ struct TreemapInspectorView: View {
                         .foregroundColor(.secondary)
                 }
 
-                Spacer()
+                Spacer(minLength: 20)
 
                 VStack(spacing: 8) {
-                    if !node.children.isEmpty {
-                        LiquidGlassButton("Drill Down into Folder", icon: "arrow.down.forward.and.arrow.up.backward") {
+                    if node.isDirectory && !node.children.isEmpty {
+                        Button(action: {
                             appState.drillDownTreemap(to: node)
+                        }) {
+                            HStack {
+                                Image(systemName: "arrow.down.right.and.arrow.up.left")
+                                Text("Drill Down into \(node.name)")
+                            }
+                            .frame(maxWidth: .infinity)
                         }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
                     }
 
                     if FileManager.default.fileExists(atPath: node.path) {
@@ -285,7 +418,7 @@ struct TreemapInspectorView: View {
                             NSWorkspace.shared.selectFile(node.path, inFileViewerRootedAtPath: "")
                         }) {
                             HStack {
-                                Image(systemName: "arrow.up.forward.square")
+                                Image(systemName: "arrow.up.right.square")
                                 Text("Reveal in Finder")
                             }
                             .frame(maxWidth: .infinity)
@@ -293,6 +426,19 @@ struct TreemapInspectorView: View {
                         .buttonStyle(.bordered)
                         .controlSize(.regular)
                     }
+
+                    Button(action: {
+                        NSPasteboard.general.clearContents()
+                        NSPasteboard.general.setString(node.path, forType: .string)
+                    }) {
+                        HStack {
+                            Image(systemName: "doc.on.doc")
+                            Text("Copy Path")
+                        }
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
                 }
             }
             .padding(16)
@@ -306,14 +452,14 @@ struct InspectorRow: View {
     let value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label)
-                .font(.system(size: 10, weight: .medium))
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label.uppercased())
+                .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(.secondary)
             Text(value)
-                .font(.system(size: 11, design: .monospaced))
+                .font(.system(size: 12, design: .monospaced))
                 .lineLimit(3)
-                .truncationMode(.middle)
+                .textSelection(.enabled)
         }
     }
 }

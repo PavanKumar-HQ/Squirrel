@@ -7,23 +7,23 @@ public enum SquirrelTheme {
     public static let brandWarm = Color(red: 0.76, green: 0.46, blue: 0.22)
     public static let brandAccent = Color.accentColor
 
-    // Semantic category tint colors
+    // Semantic category tint colors adhering to Apple HIG
     public static func color(for category: StorageCategory) -> Color {
         switch category {
         case .userCaches:
-            return Color.teal
+            return Color(red: 0.18, green: 0.64, blue: 0.74) // Refined Ocean Teal
         case .systemLogs:
-            return Color.indigo
+            return Color(red: 0.42, green: 0.46, blue: 0.80) // Slate Indigo
         case .downloadsAndInstallers:
-            return Color.orange
+            return Color(red: 0.90, green: 0.52, blue: 0.20) // Warm Amber
         case .largeFiles:
-            return Color.purple
+            return Color(red: 0.66, green: 0.38, blue: 0.84) // Royal Violet
         case .duplicates:
-            return Color.pink
+            return Color(red: 0.88, green: 0.35, blue: 0.42) // Coral Rose
         case .appLeftovers:
-            return Color.yellow
+            return Color(red: 0.88, green: 0.68, blue: 0.22) // Warm Gold
         case .otherUserData:
-            return Color.gray
+            return Color(red: 0.52, green: 0.56, blue: 0.62) // Neutral Slate
         }
     }
 
