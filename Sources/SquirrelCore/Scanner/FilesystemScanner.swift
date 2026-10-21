@@ -215,6 +215,11 @@ public actor FilesystemScanner {
             if isCancelled || Task.isCancelled { break }
 
             itemCount += 1
+            if itemCount % 25 == 0 {
+                await Task.yield()
+                if isCancelled || Task.isCancelled { break }
+            }
+
             let now = Date()
             if now.timeIntervalSince(lastProgressDate) >= 0.1 {
                 lastProgressDate = now

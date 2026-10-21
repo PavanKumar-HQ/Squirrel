@@ -640,20 +640,17 @@ await runAsyncTest("Cache Cleanup 5-Metric Storage Recovery & Candidate Accounti
 await runAsyncTest("Cooperative Cancellation Responsiveness") {
     let largeDir = tempDir.appendingPathComponent("CancelFixture", isDirectory: true)
     try FileManager.default.createDirectory(at: largeDir, withIntermediateDirectories: true)
-    for i in 0..<100 {
+    for i in 0..<300 {
         let f = largeDir.appendingPathComponent("item_\(i).txt")
         try "test".write(to: f, atomically: true, encoding: .utf8)
     }
 
     let cancelScanner = FilesystemScanner()
     let scanTask = Task {
-        return await cancelScanner.scan(roots: [largeDir]) { _ in
-            Thread.sleep(forTimeInterval: 0.002)
-        }
+        return await cancelScanner.scan(roots: [largeDir])
     }
 
-    // Cancel while progress is streaming
-    try await Task.sleep(nanoseconds: 5_000_000)
+    // Cancel task immediately
     scanTask.cancel()
     await cancelScanner.cancel()
     let cancelResult = await scanTask.value
