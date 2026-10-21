@@ -10,45 +10,58 @@ public struct DuplicatesView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Header stats & Action
-            HStack {
+            // Liquid Glass Header Toolbar
+            HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Exact Duplicate Files")
-                        .font(.headline)
-                    Text("Identified by matching full SHA-256 cryptographic hashes. User review is required before removal.")
+                        .font(.system(size: 16, weight: .bold))
+                    Text("Confirmed by full SHA-256 cryptographic hashing and byte-by-byte content verification.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
 
                 Spacer()
 
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.shield.fill")
+                        .foregroundColor(.green)
+                    Text("Byte-by-Byte Verified")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .liquidGlassCapsule()
+
                 if !appState.selectedDuplicatePaths.isEmpty {
-                    Button(action: { appState.showDuplicateConfirmSheet = true }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "trash")
-                            Text("Remove Selected Copies (\(appState.selectedDuplicatePaths.count))")
-                        }
+                    LiquidGlassButton(
+                        "Trash Selected (\(appState.selectedDuplicatePaths.count))",
+                        icon: "trash.fill",
+                        isProminent: true,
+                        role: .destructive
+                    ) {
+                        appState.showDuplicateConfirmSheet = true
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
                 }
             }
-            .padding(12)
-            .background(Color(NSColor.controlBackgroundColor))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color(NSColor.windowBackgroundColor))
 
             Divider()
 
             if appState.duplicateGroups.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "doc.on.doc")
-                        .font(.system(size: 44))
-                        .foregroundColor(.secondary)
+                VStack(spacing: 14) {
+                    Image(systemName: "doc.on.doc.fill")
+                        .font(.system(size: 46))
+                        .foregroundColor(.secondary.opacity(0.7))
                     Text("No Exact Duplicates Found")
                         .font(.headline)
-                        .foregroundColor(.secondary)
-                    Text("All scanned files appear to have unique contents.")
+                    Text("All scanned candidate files have unique byte contents across the scanned directory.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 360)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
@@ -67,7 +80,7 @@ public struct DuplicatesView: View {
             }
         }
         .confirmationDialog(
-            "Remove Selected Duplicate Copies?",
+            "Move Selected Duplicate Copies to Trash?",
             isPresented: Binding(
                 get: { appState.showDuplicateConfirmSheet },
                 set: { appState.showDuplicateConfirmSheet = $0 }
@@ -79,7 +92,7 @@ public struct DuplicatesView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Selected duplicate copies will be moved to macOS Trash. The original copy you chose to keep remains untouched.")
+            Text("Selected duplicate copies will be moved safely to macOS Trash. The original copy designated to keep will remain completely untouched.")
         }
     }
 }
@@ -91,50 +104,60 @@ struct DuplicateGroupSectionView: View {
     var body: some View {
         Section {
             ForEach(group.files) { member in
-                HStack(spacing: 10) {
-                    Toggle("", isOn: Binding(
-                        get: { selectedPaths.contains(member.path) },
-                        set: { isChecked in
-                            if isChecked {
-                                selectedPaths.insert(member.path)
-                            } else {
-                                selectedPaths.remove(member.path)
+                HStack(spacing: 12) {
+                    if member.isRecommendedToKeep {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(.blue)
+                            .frame(width: 18)
+                    } else {
+                        Toggle("", isOn: Binding(
+                            get: { selectedPaths.contains(member.path) },
+                            set: { isChecked in
+                                if isChecked {
+                                    selectedPaths.insert(member.path)
+                                } else {
+                                    selectedPaths.remove(member.path)
+                                }
                             }
-                        }
-                    ))
-                    .toggleStyle(.checkbox)
-                    .labelsHidden()
+                        ))
+                        .toggleStyle(.checkbox)
+                        .labelsHidden()
+                        .frame(width: 18)
+                    }
 
-                    Image(systemName: "doc")
-                        .foregroundColor(.secondary)
+                    Image(systemName: member.isRecommendedToKeep ? "doc.fill" : "doc")
+                        .font(.system(size: 15))
+                        .foregroundColor(member.isRecommendedToKeep ? .blue : .secondary)
 
                     VStack(alignment: .leading, spacing: 2) {
-                        HStack(spacing: 6) {
+                        HStack(spacing: 8) {
                             Text(member.fileName)
-                                .font(.body.weight(.medium))
+                                .font(.system(size: 13, weight: .medium))
 
                             if member.isRecommendedToKeep {
-                                Text("RECOMMENDED TO KEEP")
+                                Text("ORIGINAL (KEEP)")
                                     .font(.system(size: 9, weight: .bold))
                                     .padding(.horizontal, 6)
                                     .padding(.vertical, 2)
-                                    .background(Color.blue.opacity(0.15))
+                                    .background(Color.blue.opacity(0.14))
                                     .foregroundColor(.blue)
                                     .cornerRadius(4)
                             }
                         }
 
                         Text(member.path)
-                            .font(.caption)
+                            .font(.system(size: 11))
                             .foregroundColor(.secondary)
                             .lineLimit(1)
+                            .truncationMode(.middle)
                     }
 
                     Spacer()
 
                     if let modDate = member.modificationDate {
                         Text(modDate.formatted(date: .abbreviated, time: .shortened))
-                            .font(.caption)
+                            .font(.caption2)
                             .foregroundColor(.secondary)
                     }
 
@@ -143,28 +166,31 @@ struct DuplicateGroupSectionView: View {
                             NSWorkspace.shared.selectFile(member.path, inFileViewerRootedAtPath: "")
                         }) {
                             Image(systemName: "arrow.up.forward.square")
+                                .font(.system(size: 13))
+                                .foregroundColor(.secondary)
                         }
                         .buttonStyle(.plain)
+                        .help("Reveal in Finder")
                     }
                 }
-                .padding(.vertical, 2)
+                .padding(.vertical, 3)
             }
         } header: {
-            HStack {
+            HStack(spacing: 8) {
                 Text("\(group.files.count) Copies • \(ByteCountFormatter.string(fromByteCount: group.fileSize, countStyle: .file)) each")
-                    .font(.subheadline.weight(.semibold))
+                    .font(.system(size: 12, weight: .bold))
 
                 Spacer()
 
                 Text("SHA-256: \(group.sha256Hash.prefix(12))...")
-                    .font(.caption.monospaced())
+                    .font(.system(size: 10, design: .monospaced))
                     .foregroundColor(.secondary)
 
                 Text("Reclaimable: \(ByteCountFormatter.string(fromByteCount: group.potentialReclaimableBytes, countStyle: .file))")
-                    .font(.caption.weight(.medium))
+                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
                     .foregroundColor(.green)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 6)
         }
     }
 }

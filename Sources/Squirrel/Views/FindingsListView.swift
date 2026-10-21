@@ -10,55 +10,68 @@ public struct FindingsListView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Filter and Action Toolbar
+            // Liquid Glass Filter & Search Toolbar
             HStack(spacing: 12) {
                 Picker("Filter", selection: Binding(
                     get: { appState.selectedFindingFilterIndex },
                     set: { appState.selectedFindingFilterIndex = $0 }
                 )) {
-                    Text("All Findings").tag(0)
-                    Text("Safe to Clean").tag(1)
-                    Text("Review Recommended").tag(2)
-                    Text("Keep / Excluded").tag(3)
+                    Text("All (\(appState.findings.count))").tag(0)
+                    Text("Safe to Clean (\(safeCount))").tag(1)
+                    Text("Review (\(reviewCount))").tag(2)
+                    Text("Keep (\(keepCount))").tag(3)
                 }
                 .pickerStyle(.segmented)
-                .frame(maxWidth: 420)
+                .frame(maxWidth: 440)
 
                 Spacer()
 
-                TextField("Search findings...", text: Binding(
-                    get: { appState.findingSearchText },
-                    set: { appState.findingSearchText = $0 }
-                ))
-                .textFieldStyle(.roundedBorder)
-                .frame(maxWidth: 220)
+                HStack(spacing: 6) {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundColor(.secondary)
+                    TextField("Search findings...", text: Binding(
+                        get: { appState.findingSearchText },
+                        set: { appState.findingSearchText = $0 }
+                    ))
+                    .textFieldStyle(.plain)
+
+                    if !appState.findingSearchText.isEmpty {
+                        Button(action: { appState.findingSearchText = "" }) {
+                            Image(systemName: "xmark.circle.fill")
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 5)
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(8)
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.1), lineWidth: 0.8))
+                .frame(maxWidth: 240)
 
                 if !appState.selectedFindingIds.isEmpty {
-                    Button(action: { appState.showFindingConfirmSheet = true }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "trash")
-                            Text("Clean Selected (\(appState.selectedFindingIds.count))")
-                        }
+                    LiquidGlassButton("Clean Selected (\(appState.selectedFindingIds.count))", icon: "trash.fill", isProminent: true, role: .destructive) {
+                        appState.showFindingConfirmSheet = true
                     }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.red)
                 }
             }
-            .padding(12)
-            .background(Color(NSColor.controlBackgroundColor))
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color(NSColor.windowBackgroundColor))
 
             Divider()
 
-            // Findings List
+            // Findings List / Table
             if filteredFindings.isEmpty {
-                VStack(spacing: 12) {
-                    Image(systemName: "checkmark.seal")
-                        .font(.system(size: 40))
-                        .foregroundColor(.secondary)
+                VStack(spacing: 14) {
+                    Image(systemName: "checkmark.seal.fill")
+                        .font(.system(size: 46))
+                        .foregroundColor(.green.opacity(0.8))
                     Text("No findings match the current filter")
                         .font(.headline)
-                        .foregroundColor(.secondary)
-                    Text("Try changing the filter or running a fresh scan.")
+                        .foregroundColor(.primary)
+                    Text(appState.findings.isEmpty ? "Run a scan to analyze storage opportunities." : "Try clearing search or choosing another filter category.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                 }
@@ -78,10 +91,12 @@ public struct FindingsListView: View {
                                 }
                             },
                             onToggleExpand: {
-                                if appState.expandedFindingId == finding.id {
-                                    appState.expandedFindingId = nil
-                                } else {
-                                    appState.expandedFindingId = finding.id
+                                withAnimation(.easeInOut(duration: 0.18)) {
+                                    if appState.expandedFindingId == finding.id {
+                                        appState.expandedFindingId = nil
+                                    } else {
+                                        appState.expandedFindingId = finding.id
+                                    }
                                 }
                             }
                         )
@@ -103,8 +118,20 @@ public struct FindingsListView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Selected files will be handled according to their verified recovery policy (moved to Trash or managed quarantine).")
+            Text("Selected files will be handled according to their verified safety policy (moved to Trash or managed quarantine with full undo capability).")
         }
+    }
+
+    private var safeCount: Int {
+        appState.findings.filter { $0.eligibility == .safeToClean }.count
+    }
+
+    private var reviewCount: Int {
+        appState.findings.filter { $0.eligibility == .reviewRecommended }.count
+    }
+
+    private var keepCount: Int {
+        appState.findings.filter { $0.eligibility == .keep }.count
     }
 
     private var filteredFindings: [Finding] {
@@ -135,8 +162,8 @@ struct FindingRowView: View {
     let onToggleExpand: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            HStack(spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 12) {
                 Toggle("", isOn: Binding(
                     get: { isSelected },
                     set: { _ in onToggleSelect() }
@@ -145,29 +172,44 @@ struct FindingRowView: View {
                 .labelsHidden()
 
                 Image(systemName: finding.category.iconName)
-                    .foregroundColor(colorForEligibility(finding.eligibility))
-                    .frame(width: 20)
+                    .font(.system(size: 15))
+                    .foregroundColor(SquirrelTheme.color(for: finding.category))
+                    .frame(width: 28, height: 28)
+                    .background(SquirrelTheme.color(for: finding.category).opacity(0.12))
+                    .cornerRadius(6)
 
                 VStack(alignment: .leading, spacing: 2) {
                     Text(finding.title)
-                        .font(.body.weight(.medium))
+                        .font(.system(size: 13, weight: .medium))
                         .lineLimit(1)
                     Text(finding.path)
-                        .font(.caption)
+                        .font(.system(size: 11))
                         .foregroundColor(.secondary)
                         .lineLimit(1)
+                        .truncationMode(.middle)
                 }
 
                 Spacer()
 
+                Button(action: {
+                    NSWorkspace.shared.selectFile(finding.path, inFileViewerRootedAtPath: "")
+                }) {
+                    Image(systemName: "arrow.up.forward.square")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Reveal in Finder")
+
                 EligibilityBadge(eligibility: finding.eligibility)
 
                 Text(ByteCountFormatter.string(fromByteCount: finding.allocatedSize, countStyle: .file))
-                    .font(.subheadline.weight(.semibold).monospacedDigit())
-                    .frame(width: 80, alignment: .trailing)
+                    .font(.system(size: 12, weight: .semibold).monospacedDigit())
+                    .frame(width: 85, alignment: .trailing)
 
                 Button(action: onToggleExpand) {
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                        .font(.system(size: 11, weight: .bold))
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
@@ -175,77 +217,73 @@ struct FindingRowView: View {
             .contentShape(Rectangle())
 
             if isExpanded {
-                VStack(alignment: .leading, spacing: 8) {
+                VStack(alignment: .leading, spacing: 10) {
                     Divider()
 
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: 4) {
-                            Text("Detection Rule: \(finding.ruleId)")
-                                .font(.caption.weight(.bold))
+                            HStack(spacing: 6) {
+                                Text("Rule:")
+                                    .font(.caption2.weight(.bold))
+                                    .foregroundColor(.secondary)
+                                Text(finding.ruleId)
+                                    .font(.caption2.weight(.semibold).monospaced())
+                                    .padding(.horizontal, 6)
+                                    .padding(.vertical, 2)
+                                    .background(Color.secondary.opacity(0.12))
+                                    .cornerRadius(4)
+                            }
                             Text(finding.ruleDescription)
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
+
                         Spacer()
+
                         VStack(alignment: .trailing, spacing: 4) {
-                            Text("Recovery Method")
+                            Text("Recovery Strategy")
                                 .font(.caption2.weight(.bold))
                                 .foregroundColor(.secondary)
                             Text(finding.recoveryMethod.rawValue)
-                                .font(.caption)
+                                .font(.caption.weight(.medium))
                                 .foregroundColor(.primary)
                         }
                     }
 
                     if !finding.evidence.isEmpty {
-                        VStack(alignment: .leading, spacing: 2) {
+                        VStack(alignment: .leading, spacing: 3) {
                             Text("Technical Evidence:")
                                 .font(.caption2.weight(.bold))
                                 .foregroundColor(.secondary)
                             ForEach(finding.evidence, id: \.self) { ev in
-                                HStack(spacing: 4) {
+                                HStack(spacing: 5) {
                                     Text("•")
+                                        .foregroundColor(.secondary)
                                     Text(ev)
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
                                 }
-                                .font(.caption)
-                                .foregroundColor(.secondary)
                             }
                         }
                     }
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Possible Consequences:")
+                        Text("Safety & Consequences:")
                             .font(.caption2.weight(.bold))
                             .foregroundColor(.secondary)
                         Text(finding.consequencesExplanation)
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
-
-                    HStack {
-                        Spacer()
-                        if FileManager.default.fileExists(atPath: finding.path) {
-                            Button("Show in Finder") {
-                                NSWorkspace.shared.selectFile(finding.path, inFileViewerRootedAtPath: "")
-                            }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-                        }
-                    }
                 }
-                .padding(.leading, 32)
-                .padding(.vertical, 4)
+                .padding(.leading, 36)
+                .padding(.trailing, 10)
+                .padding(.vertical, 8)
+                .background(Color.secondary.opacity(0.04))
+                .cornerRadius(8)
             }
         }
         .padding(.vertical, 4)
-    }
-
-    private func colorForEligibility(_ eligibility: CleanupEligibility) -> Color {
-        switch eligibility {
-        case .safeToClean: return .green
-        case .reviewRecommended: return .orange
-        case .keep: return .secondary
-        }
     }
 }
 
@@ -254,10 +292,10 @@ struct EligibilityBadge: View {
 
     var body: some View {
         Text(eligibility.rawValue)
-            .font(.caption2.weight(.semibold))
-            .padding(.horizontal, 8)
+            .font(.system(size: 10, weight: .semibold))
+            .padding(.horizontal, 7)
             .padding(.vertical, 3)
-            .background(bgColor.opacity(0.15))
+            .background(bgColor.opacity(0.14))
             .foregroundColor(bgColor)
             .cornerRadius(4)
     }

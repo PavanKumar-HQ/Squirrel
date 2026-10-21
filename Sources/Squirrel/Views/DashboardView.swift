@@ -11,38 +11,42 @@ public struct DashboardView: View {
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
-                // Squirrel Brand Header
-                HStack(spacing: 14) {
-                    if let imagePath = Bundle.module.path(forResource: "AppIcon", ofType: "png"),
-                       let nsImg = NSImage(contentsOfFile: imagePath) {
-                        Image(nsImage: nsImg)
-                            .resizable()
-                            .aspectRatio(contentMode: .fit)
-                            .frame(width: 48, height: 48)
-                            .cornerRadius(10)
-                    } else {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 10)
-                                .fill(Color(red: 0.65, green: 0.42, blue: 0.22))
-                                .frame(width: 48, height: 48)
-                            Image(systemName: "leaf.fill")
-                                .font(.title2)
-                                .foregroundColor(.white)
-                        }
-                    }
-
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text("Squirrel")
+                // 1. Top Section: Hero Header & Target Bar
+                HStack(alignment: .center, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Storage Overview")
                             .font(.system(size: 22, weight: .bold))
-                        Text("A little more room for your Mac.")
+                        Text("Accurate APFS volume analytics, evidence-based recommendations, and space breakdown.")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
-                    Spacer()
-                }
-                .padding(.bottom, 2)
 
-                // 1. Storage Capacity Card
+                    Spacer()
+
+                    // Liquid Glass Target Indicator Pill
+                    HStack(spacing: 8) {
+                        Image(systemName: "folder.fill")
+                            .font(.system(size: 13))
+                            .foregroundColor(.accentColor)
+                        Text(appState.scanTargetDescription)
+                            .font(.system(size: 12, weight: .medium))
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                            .frame(maxWidth: 240)
+
+                        Button("Change...") {
+                            appState.selectCustomFolderAndScan()
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.accentColor)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .liquidGlassCapsule(interactive: true)
+                }
+
+                // 2. Volume Capacity Card
                 VolumeCapacityCard(
                     volume: appState.volumeSpace,
                     scanTargetDescription: appState.scanTargetDescription,
@@ -59,12 +63,14 @@ public struct DashboardView: View {
                     }
                 )
 
-                // 2. Scan Progress (if active)
+                // 3. Scan Progress (Active Traversal)
                 if appState.scanStatus == .scanning {
-                    ScanProgressCard(progress: appState.scanProgress)
+                    ScanProgressCard(progress: appState.scanProgress, onCancel: {
+                        appState.cancelScan()
+                    })
                 }
 
-                // 3. Cleanup Opportunities & Action Banner
+                // 4. Opportunities Summary & Action Banner
                 if appState.scanStatus == .completed {
                     OpportunitiesSummaryCard(
                         safeToCleanBytes: appState.safeToCleanBytes,
@@ -76,74 +82,130 @@ public struct DashboardView: View {
                     )
                 }
 
-                // 4. Interactive Treemap Section
+                // 5. Storage Distribution Preview
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Storage Distribution")
                                 .font(.title3.weight(.bold))
-                            Text("Interactive squarified treemap visualizes proportional storage consumption.")
+                            Text("Proportional squarified treemap visualizes disk allocation from current scan.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
+
                         Spacer()
+
+                        if !appState.scannedItems.isEmpty {
+                            Button(action: {
+                                appState.selectedSection = .treemap
+                            }) {
+                                HStack(spacing: 4) {
+                                    Text("Explore Full Treemap")
+                                    Image(systemName: "arrow.right")
+                                }
+                                .font(.caption.weight(.medium))
+                            }
+                            .buttonStyle(.plain)
+                            .foregroundColor(.accentColor)
+                        }
                     }
 
                     if appState.scannedItems.isEmpty {
                         ZStack {
-                            RoundedRectangle(cornerRadius: 8)
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .fill(Color(NSColor.controlBackgroundColor))
-                                .frame(height: 320)
+                                .frame(height: 280)
 
                             VStack(spacing: 12) {
                                 Image(systemName: "square.grid.3x3.topleft.filled")
-                                    .font(.system(size: 40))
-                                    .foregroundColor(.secondary)
+                                    .font(.system(size: 42))
+                                    .foregroundColor(.secondary.opacity(0.7))
                                 Text("No Storage Data Available")
                                     .font(.headline)
-                                Text("Click 'Scan Disk' above to map real disk usage.")
+                                Text("Run a scan on standard folders or choose a custom directory above.")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
+
+                                LiquidGlassButton("Scan Standard Folders", icon: "arrow.triangle.2.circlepath", isProminent: true) {
+                                    appState.startScan()
+                                }
+                                .padding(.top, 4)
                             }
                         }
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
+                        )
                     } else {
                         TreemapView(appState: appState)
                             .frame(height: 380)
-                            .cornerRadius(8)
-                            .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.secondary.opacity(0.2), lineWidth: 1))
+                            .cornerRadius(10)
+                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 1))
                     }
                 }
 
-                // 5. Top Cleanup Opportunities Preview
+                // 6. Top Cleanup Opportunities Preview
                 if !appState.findings.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Top Cleanup Opportunities")
-                            .font(.title3.weight(.bold))
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack {
+                            Text("Top Cleanup Opportunities")
+                                .font(.title3.weight(.bold))
+                            Spacer()
+                            Button("View All (\(appState.findings.count))") {
+                                appState.selectedSection = .findings
+                            }
+                            .buttonStyle(.plain)
+                            .font(.caption.weight(.medium))
+                            .foregroundColor(.accentColor)
+                        }
 
                         VStack(spacing: 8) {
                             ForEach(appState.findings.prefix(5)) { finding in
-                                HStack {
+                                HStack(spacing: 12) {
                                     Image(systemName: finding.category.iconName)
-                                        .foregroundColor(finding.eligibility == .safeToClean ? .green : .orange)
-                                        .frame(width: 24)
+                                        .font(.system(size: 16))
+                                        .foregroundColor(SquirrelTheme.color(for: finding.category))
+                                        .frame(width: 28, height: 28)
+                                        .background(SquirrelTheme.color(for: finding.category).opacity(0.12))
+                                        .cornerRadius(6)
 
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(finding.title)
                                             .font(.body.weight(.medium))
-                                        Text(finding.ruleDescription)
-                                            .font(.caption)
+                                        Text(finding.path)
+                                            .font(.caption2)
                                             .foregroundColor(.secondary)
                                             .lineLimit(1)
+                                            .truncationMode(.middle)
                                     }
 
                                     Spacer()
 
+                                    Button(action: {
+                                        NSWorkspace.shared.selectFile(finding.path, inFileViewerRootedAtPath: "")
+                                    }) {
+                                        Image(systemName: "arrow.up.right.square")
+                                            .font(.system(size: 13))
+                                            .foregroundColor(.secondary)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help("Reveal in Finder")
+
                                     Text(ByteCountFormatter.string(fromByteCount: finding.allocatedSize, countStyle: .file))
                                         .font(.subheadline.weight(.semibold).monospacedDigit())
+
+                                    Text(finding.eligibility.rawValue)
+                                        .font(.system(size: 10, weight: .bold))
+                                        .padding(.horizontal, 6)
+                                        .padding(.vertical, 2)
+                                        .background(
+                                            Capsule()
+                                                .fill(finding.eligibility == .safeToClean ? Color.green.opacity(0.15) : Color.orange.opacity(0.15))
+                                        )
+                                        .foregroundColor(finding.eligibility == .safeToClean ? .green : .orange)
                                 }
                                 .padding(10)
-                                .background(Color(NSColor.controlBackgroundColor))
-                                .cornerRadius(6)
+                                .solidCard(cornerRadius: 8)
                             }
                         }
                     }
@@ -164,7 +226,7 @@ public struct DashboardView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Only allowlisted items meeting strict safety criteria (inactive caches and old logs) will be processed. Eligible items will be moved to managed quarantine or Trash.")
+            Text("Only allowlisted items meeting strict safety criteria (inactive caches and old diagnostic logs) will be processed. Eligible items will be moved to managed quarantine or Trash.")
         }
     }
 }
@@ -198,7 +260,7 @@ struct VolumeCapacityCard: View {
 
                     HStack(spacing: 6) {
                         Text("Source: \(volume.measurementSource)")
-                            .font(.caption)
+                            .font(.caption2.weight(.medium))
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
                             .background(Color.secondary.opacity(0.12))
@@ -214,123 +276,111 @@ struct VolumeCapacityCard: View {
                                 .foregroundColor(.secondary)
                         }
                     }
-
-                    Text("Target: \(scanTargetDescription)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
                 }
 
                 Spacer()
 
                 if scanStatus == .scanning {
-                    Button(action: onCancel) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "xmark.circle")
-                            Text("Stop Scan")
-                        }
-                    }
-                    .buttonStyle(.bordered)
+                    LiquidGlassButton("Stop Scan", icon: "xmark.circle.fill", role: .destructive, action: onCancel)
                 } else {
-                    HStack(spacing: 8) {
-                        Button(action: onSelectFolder) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "folder.badge.gearshape")
-                                Text("Choose Folder...")
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .controlSize(.regular)
-
-                        Button(action: onScanStandard) {
-                            HStack(spacing: 4) {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                Text("Scan Standard")
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.regular)
+                    LiquidGlassContainer(spacing: 8) {
+                        LiquidGlassButton("Choose Folder...", icon: "folder.badge.gearshape", action: onSelectFolder)
+                        LiquidGlassButton("Scan Standard", icon: "arrow.triangle.2.circlepath", isProminent: true, action: onScanStandard)
                     }
                 }
             }
 
             if volume.totalCapacity == 0 {
-                HStack {
-                    Image(systemName: "exclamationmark.triangle")
+                HStack(spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundColor(.orange)
                     Text("Volume storage capacity is currently unavailable from macOS filesystem APIs.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
-                .padding(8)
+                .padding(10)
                 .background(Color.orange.opacity(0.1))
-                .cornerRadius(6)
+                .cornerRadius(8)
             } else {
                 let fractionUsed = Double(volume.usedSpace) / Double(volume.totalCapacity)
 
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 8) {
                     GeometryReader { geo in
                         ZStack(alignment: .leading) {
                             Capsule()
-                                .fill(Color.secondary.opacity(0.18))
-                                .frame(height: 12)
+                                .fill(Color.secondary.opacity(0.16))
+                                .frame(height: 14)
 
                             Capsule()
                                 .fill(LinearGradient(colors: [Color.blue, Color.purple], startPoint: .leading, endPoint: .trailing))
-                                .frame(width: max(8, geo.size.width * CGFloat(fractionUsed)), height: 12)
+                                .frame(width: max(8, geo.size.width * CGFloat(fractionUsed)), height: 14)
                         }
                     }
-                    .frame(height: 12)
+                    .frame(height: 14)
 
                     HStack {
-                        Text("Used: \(ByteCountFormatter.string(fromByteCount: volume.usedSpace, countStyle: .file)) (\(Int(fractionUsed * 100))%)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        HStack(spacing: 6) {
+                            Circle().fill(Color.blue).frame(width: 8, height: 8)
+                            Text("Used: \(ByteCountFormatter.string(fromByteCount: volume.usedSpace, countStyle: .file)) (\(Int(fractionUsed * 100))%)")
+                                .font(.caption.monospacedDigit())
+                        }
 
                         Spacer()
 
-                        Text("Available: \(ByteCountFormatter.string(fromByteCount: volume.availableCapacity, countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: volume.totalCapacity, countStyle: .file))")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
+                        HStack(spacing: 6) {
+                            Circle().fill(Color.secondary.opacity(0.5)).frame(width: 8, height: 8)
+                            Text("Available: \(ByteCountFormatter.string(fromByteCount: volume.availableCapacity, countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: volume.totalCapacity, countStyle: .file))")
+                                .font(.caption.monospacedDigit())
+                                .foregroundColor(.secondary)
+                        }
                     }
 
                     if volume.opportunisticAvailableCapacity > volume.availableCapacity {
                         let purgeable = volume.opportunisticAvailableCapacity - volume.availableCapacity
-                        Text("Purgeable by macOS APFS under storage pressure: \(ByteCountFormatter.string(fromByteCount: purgeable, countStyle: .file))")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
+                        HStack(spacing: 4) {
+                            Image(systemName: "info.circle")
+                                .font(.caption2)
+                            Text("Purgeable by macOS APFS under storage pressure: \(ByteCountFormatter.string(fromByteCount: purgeable, countStyle: .file))")
+                                .font(.caption2)
+                        }
+                        .foregroundColor(.secondary)
                     }
                 }
             }
         }
         .padding(16)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(10)
+        .solidCard(cornerRadius: 12)
     }
 }
 
 struct ScanProgressCard: View {
     let progress: ScanProgress
+    let onCancel: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                ProgressView()
-                    .controlSize(.small)
+        HStack(spacing: 12) {
+            ProgressView()
+                .controlSize(.small)
+
+            VStack(alignment: .leading, spacing: 2) {
                 Text("Analyzing: \(progress.currentPath)")
-                    .font(.caption)
+                    .font(.caption.weight(.medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Spacer()
-                Text("\(progress.itemsScannedCount) items (\(ByteCountFormatter.string(fromByteCount: progress.bytesScannedTotal, countStyle: .file)))")
-                    .font(.caption.monospacedDigit())
+                Text("\(progress.itemsScannedCount) items discovered (\(ByteCountFormatter.string(fromByteCount: progress.bytesScannedTotal, countStyle: .file)))")
+                    .font(.caption2.monospacedDigit())
                     .foregroundColor(.secondary)
             }
+
+            Spacer()
+
+            Button("Cancel", action: onCancel)
+                .buttonStyle(.plain)
+                .font(.caption.weight(.semibold))
+                .foregroundColor(.red)
         }
         .padding(12)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(8)
+        .liquidGlassCard(cornerRadius: 10)
     }
 }
 
@@ -343,35 +393,35 @@ struct OpportunitiesSummaryCard: View {
     var body: some View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Safe Cleanup Opportunity")
-                    .font(.headline)
-                Text("Validated non-essential caches and stale diagnostic logs.")
+                HStack(spacing: 6) {
+                    Image(systemName: "sparkles")
+                        .foregroundColor(.green)
+                    Text("Safe Cleanup Opportunity")
+                        .font(.headline)
+                }
+
+                Text("Validated non-essential caches and stale diagnostic logs meeting strict safety rules.")
                     .font(.caption)
                     .foregroundColor(.secondary)
 
                 Text(ByteCountFormatter.string(fromByteCount: safeToCleanBytes, countStyle: .file))
-                    .font(.title2.weight(.bold).monospacedDigit())
+                    .font(.system(size: 24, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundColor(safeToCleanBytes > 0 ? .green : .secondary)
             }
 
             Spacer()
 
-            VStack(alignment: .trailing, spacing: 6) {
+            VStack(alignment: .trailing, spacing: 8) {
                 if safeToCleanBytes > 0 {
-                    Button(action: onCleanSafely) {
-                        HStack(spacing: 6) {
-                            Image(systemName: "sparkles")
-                            Text("Clean Safely (\(ByteCountFormatter.string(fromByteCount: safeToCleanBytes, countStyle: .file)))")
-                        }
-                        .fontWeight(.semibold)
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.green)
-                    .controlSize(.large)
+                    LiquidGlassButton("Clean Safely (\(ByteCountFormatter.string(fromByteCount: safeToCleanBytes, countStyle: .file)))", icon: "sparkles", isProminent: true, action: onCleanSafely)
                 } else {
-                    Text("No Safe Batch Items")
-                        .font(.caption)
+                    Text("No Safe Batch Items Found")
+                        .font(.caption.weight(.medium))
                         .foregroundColor(.secondary)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 4)
+                        .background(Color.secondary.opacity(0.1))
+                        .cornerRadius(6)
                 }
 
                 HStack(spacing: 12) {
@@ -379,12 +429,11 @@ struct OpportunitiesSummaryCard: View {
                     Text("•")
                     Text("Duplicates: \(ByteCountFormatter.string(fromByteCount: duplicateBytes, countStyle: .file))")
                 }
-                .font(.caption2)
+                .font(.caption2.monospacedDigit())
                 .foregroundColor(.secondary)
             }
         }
         .padding(16)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(10)
+        .solidCard(cornerRadius: 12)
     }
 }

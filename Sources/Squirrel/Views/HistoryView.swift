@@ -10,16 +10,34 @@ public struct HistoryView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            Picker("View", selection: Binding(
-                get: { appState.selectedHistoryTab },
-                set: { appState.selectedHistoryTab = $0 }
-            )) {
-                Text("Operation Journal").tag(0)
-                Text("Quarantine & Recovery").tag(1)
+            // Liquid Glass Tab Selector Bar
+            HStack {
+                Picker("View", selection: Binding(
+                    get: { appState.selectedHistoryTab },
+                    set: { appState.selectedHistoryTab = $0 }
+                )) {
+                    Text("Operation Journal (\(appState.journalEntries.count))").tag(0)
+                    Text("Managed Quarantine (\(appState.quarantineRecords.count))").tag(1)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 380)
+
+                Spacer()
+
+                HStack(spacing: 6) {
+                    Image(systemName: "lock.shield")
+                        .foregroundColor(.green)
+                    Text("Undo & Rollback Safe")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 4)
+                .liquidGlassCapsule()
             }
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 340)
-            .padding(12)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .background(Color(NSColor.windowBackgroundColor))
 
             Divider()
 
@@ -42,14 +60,14 @@ struct JournalListView: View {
 
     var body: some View {
         if entries.isEmpty {
-            VStack(spacing: 12) {
+            VStack(spacing: 14) {
                 Image(systemName: "clock.arrow.circlepath")
-                    .font(.system(size: 40))
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 44))
+                    .foregroundColor(.secondary.opacity(0.7))
                 Text("No Operations Recorded Yet")
                     .font(.headline)
-                    .foregroundColor(.secondary)
-                Text("Operations executed during cleanup will be logged here.")
+                    .foregroundColor(.primary)
+                Text("Operations executed during cleanup will be logged here with byte-level verification.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
@@ -58,15 +76,18 @@ struct JournalListView: View {
             List(entries) { entry in
                 HStack(spacing: 12) {
                     Image(systemName: iconForAction(entry.actionType))
-                        .foregroundColor(entry.status == .failed ? .red : .primary)
-                        .frame(width: 24)
+                        .font(.system(size: 15))
+                        .foregroundColor(entry.status == .failed ? .red : .accentColor)
+                        .frame(width: 28, height: 28)
+                        .background(Color.secondary.opacity(0.1))
+                        .cornerRadius(6)
 
                     VStack(alignment: .leading, spacing: 2) {
                         HStack(spacing: 6) {
                             Text(entry.sanitizedName)
-                                .font(.body.weight(.medium))
+                                .font(.system(size: 13, weight: .medium))
                             Text(entry.actionType.rawValue)
-                                .font(.caption2)
+                                .font(.system(size: 10, weight: .semibold))
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 2)
                                 .background(Color.secondary.opacity(0.12))
@@ -74,13 +95,14 @@ struct JournalListView: View {
                         }
 
                         Text(entry.originalPath)
-                            .font(.caption)
+                            .font(.system(size: 11))
                             .foregroundColor(.secondary)
                             .lineLimit(1)
+                            .truncationMode(.middle)
 
                         if let err = entry.errorMessage {
                             Text("Error: \(err)")
-                                .font(.caption)
+                                .font(.caption2)
                                 .foregroundColor(.red)
                         }
                     }
@@ -94,12 +116,12 @@ struct JournalListView: View {
 
                         if entry.bytesReclaimed > 0 {
                             Text(ByteCountFormatter.string(fromByteCount: entry.bytesReclaimed, countStyle: .file))
-                                .font(.caption.weight(.semibold).monospacedDigit())
+                                .font(.system(size: 11, weight: .semibold).monospacedDigit())
                                 .foregroundColor(.green)
                         }
                     }
                 }
-                .padding(.vertical, 4)
+                .padding(.vertical, 3)
             }
             .listStyle(.inset)
         }
@@ -121,14 +143,14 @@ struct QuarantineListView: View {
 
     var body: some View {
         if records.isEmpty {
-            VStack(spacing: 12) {
-                Image(systemName: "archivebox")
-                    .font(.system(size: 40))
-                    .foregroundColor(.secondary)
+            VStack(spacing: 14) {
+                Image(systemName: "archivebox.fill")
+                    .font(.system(size: 44))
+                    .foregroundColor(.secondary.opacity(0.7))
                 Text("Quarantine Is Empty")
                     .font(.headline)
-                    .foregroundColor(.secondary)
-                Text("Files moved to managed quarantine for safe rollback will appear here.")
+                    .foregroundColor(.primary)
+                Text("Items moved to managed quarantine for safe rollback will be displayed here.")
                     .font(.subheadline)
                     .foregroundColor(.secondary)
             }
@@ -137,30 +159,30 @@ struct QuarantineListView: View {
             List(records) { record in
                 HStack(spacing: 12) {
                     Image(systemName: "shield.checkered")
+                        .font(.system(size: 18))
                         .foregroundColor(.blue)
 
                     VStack(alignment: .leading, spacing: 2) {
                         Text(URL(fileURLWithPath: record.originalPath).lastPathComponent)
-                            .font(.body.weight(.medium))
+                            .font(.system(size: 13, weight: .medium))
                         Text(record.originalPath)
-                            .font(.caption)
+                            .font(.system(size: 11))
                             .foregroundColor(.secondary)
                             .lineLimit(1)
+                            .truncationMode(.middle)
                         Text("Quarantined on \(record.timestamp.formatted(date: .abbreviated, time: .shortened)) • SHA-256: \(record.sha256.prefix(12))...")
-                            .font(.caption2.monospaced())
+                            .font(.system(size: 10, design: .monospaced))
                             .foregroundColor(.secondary)
                     }
 
                     Spacer()
 
                     Text(ByteCountFormatter.string(fromByteCount: record.fileSize, countStyle: .file))
-                        .font(.subheadline.monospacedDigit())
+                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
 
-                    Button("Restore") {
+                    LiquidGlassButton("Restore File", icon: "arrow.uturn.backward") {
                         onRestore(record)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
                 }
                 .padding(.vertical, 4)
             }

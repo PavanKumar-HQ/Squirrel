@@ -10,7 +10,7 @@ public struct TreemapView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Breadcrumbs Bar
+            // Liquid Glass Navigation & Breadcrumbs Bar
             HStack(spacing: 8) {
                 Button(action: {
                     appState.resetTreemapToOverview()
@@ -19,37 +19,53 @@ public struct TreemapView: View {
                         Image(systemName: "internaldrive")
                         Text("Overview")
                     }
-                    .font(.subheadline.weight(.medium))
+                    .font(.system(size: 12, weight: .semibold))
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(appState.activeTreemapRoot.id == appState.treemapRoot.id ? .primary : .accentColor)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(
+                    Capsule()
+                        .fill(appState.activeTreemapRoot.id == appState.treemapRoot.id ? Color.secondary.opacity(0.12) : Color.clear)
+                )
 
                 ForEach(Array(appState.treemapBreadcrumbs.enumerated()), id: \.offset) { index, crumb in
                     Image(systemName: "chevron.right")
                         .font(.caption2)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.secondary.opacity(0.6))
 
                     Button(action: {
                         appState.navigateTreemapBreadcrumb(at: index)
                     }) {
                         Text(crumb.name)
-                            .font(.subheadline.weight(.medium))
+                            .font(.system(size: 12, weight: .medium))
                     }
                     .buttonStyle(.plain)
                     .foregroundColor(index == appState.treemapBreadcrumbs.count - 1 ? .primary : .accentColor)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
                 }
 
                 Spacer()
 
                 if let selected = appState.selectedTreemapNode {
-                    Text("\(selected.name) — \(ByteCountFormatter.string(fromByteCount: selected.size, countStyle: .file))")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(SquirrelTheme.color(for: selected.category))
+                            .frame(width: 8, height: 8)
+                        Text("\(selected.name) — \(ByteCountFormatter.string(fromByteCount: selected.size, countStyle: .file))")
+                            .font(.system(size: 11, weight: .medium).monospacedDigit())
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .liquidGlassCapsule()
                 }
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 8)
-            .background(Color(NSColor.controlBackgroundColor))
+            .padding(.vertical, 10)
+            .background(Color(NSColor.windowBackgroundColor))
 
             Divider()
 
@@ -66,10 +82,13 @@ public struct TreemapView: View {
                         if computedRoot.children.isEmpty {
                             VStack(spacing: 12) {
                                 Image(systemName: "folder.badge.questionmark")
-                                    .font(.system(size: 36))
+                                    .font(.system(size: 40))
                                     .foregroundColor(.secondary)
                                 Text("No items to display for this node")
-                                    .font(.callout)
+                                    .font(.headline)
+                                    .foregroundColor(.secondary)
+                                Text("Select another directory from the overview or breadcrumbs.")
+                                    .font(.caption)
                                     .foregroundColor(.secondary)
                             }
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -95,12 +114,12 @@ public struct TreemapView: View {
                         }
                     }
                 }
-                .frame(minWidth: 400, minHeight: 300)
+                .frame(minWidth: 420, minHeight: 320)
 
                 // Selected Item Inspector Sidebar
                 if let selected = appState.selectedTreemapNode {
                     TreemapInspectorView(node: selected, appState: appState)
-                        .frame(minWidth: 260, maxWidth: 320)
+                        .frame(minWidth: 280, maxWidth: 360)
                 }
             }
         }
@@ -123,24 +142,39 @@ struct TreemapTileView: View {
     var body: some View {
         Button(action: onSelect) {
             ZStack(alignment: .topLeading) {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(colorForCategory(node.category))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 4)
-                            .stroke(isSelected ? Color.accentColor : (isHovered ? Color.white.opacity(0.4) : Color.black.opacity(0.1)), lineWidth: isSelected ? 2.5 : 1)
+                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                SquirrelTheme.color(for: node.category),
+                                SquirrelTheme.color(for: node.category).opacity(0.85)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
                     )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .stroke(
+                                isSelected ? Color.white : (isHovered ? Color.white.opacity(0.6) : Color.black.opacity(0.12)),
+                                lineWidth: isSelected ? 2.5 : 0.8
+                            )
+                    )
+                    .shadow(color: isSelected ? Color.black.opacity(0.2) : Color.clear, radius: 4, x: 0, y: 2)
 
-                if node.rect.width > 50 && node.rect.height > 30 {
+                if node.rect.width > 54 && node.rect.height > 32 {
                     VStack(alignment: .leading, spacing: 2) {
                         Text(node.name)
-                            .font(.system(size: 11, weight: .semibold))
+                            .font(.system(size: 11, weight: .bold))
                             .lineLimit(1)
                             .foregroundColor(.white)
+                            .shadow(color: Color.black.opacity(0.4), radius: 1, x: 0, y: 1)
 
-                        if node.rect.height > 44 {
+                        if node.rect.height > 46 {
                             Text(ByteCountFormatter.string(fromByteCount: node.size, countStyle: .file))
-                                .font(.system(size: 10))
-                                .foregroundColor(.white.opacity(0.85))
+                                .font(.system(size: 10, weight: .medium).monospacedDigit())
+                                .foregroundColor(.white.opacity(0.92))
+                                .shadow(color: Color.black.opacity(0.4), radius: 1, x: 0, y: 1)
                         }
                     }
                     .padding(6)
@@ -154,29 +188,10 @@ struct TreemapTileView: View {
                 Button("Drill Down into \(node.name)") { onDrillDown() }
             }
             if FileManager.default.fileExists(atPath: node.path) {
-                Button("Show in Finder") {
+                Button("Reveal in Finder") {
                     NSWorkspace.shared.selectFile(node.path, inFileViewerRootedAtPath: "")
                 }
             }
-        }
-    }
-
-    private func colorForCategory(_ category: StorageCategory) -> Color {
-        switch category {
-        case .userCaches:
-            return Color(red: 0.22, green: 0.53, blue: 0.78)
-        case .systemLogs:
-            return Color(red: 0.45, green: 0.50, blue: 0.58)
-        case .downloadsAndInstallers:
-            return Color(red: 0.85, green: 0.52, blue: 0.22)
-        case .largeFiles:
-            return Color(red: 0.80, green: 0.35, blue: 0.35)
-        case .duplicates:
-            return Color(red: 0.60, green: 0.40, blue: 0.75)
-        case .appLeftovers:
-            return Color(red: 0.35, green: 0.65, blue: 0.55)
-        case .otherUserData:
-            return Color(red: 0.35, green: 0.45, blue: 0.60)
         }
     }
 }
@@ -187,12 +202,16 @@ struct TreemapInspectorView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                HStack {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 10) {
                     Image(systemName: node.category.iconName)
-                        .font(.title2)
-                        .foregroundColor(.accentColor)
-                    VStack(alignment: .leading) {
+                        .font(.system(size: 20))
+                        .foregroundColor(SquirrelTheme.color(for: node.category))
+                        .frame(width: 36, height: 36)
+                        .background(SquirrelTheme.color(for: node.category).opacity(0.15))
+                        .cornerRadius(8)
+
+                    VStack(alignment: .leading, spacing: 2) {
                         Text(node.name)
                             .font(.headline)
                             .lineLimit(2)
@@ -204,17 +223,21 @@ struct TreemapInspectorView: View {
 
                 Divider()
 
-                VStack(alignment: .leading, spacing: 8) {
-                    LabelValueRow(label: "Allocated Size", value: ByteCountFormatter.string(fromByteCount: node.size, countStyle: .file))
-                    LabelValueRow(label: "Type", value: node.isDirectory ? "Folder" : "File")
-                    LabelValueRow(label: "Path", value: node.path)
+                VStack(alignment: .leading, spacing: 10) {
+                    Text("METRICS & METADATA")
+                        .font(.system(size: 10, weight: .bold))
+                        .foregroundColor(.secondary)
+
+                    InspectorRow(label: "Allocated Size", value: ByteCountFormatter.string(fromByteCount: node.size, countStyle: .file))
+                    InspectorRow(label: "Item Type", value: node.isDirectory ? "Directory / Bundle" : "Regular File")
+                    InspectorRow(label: "Filesystem Path", value: node.path)
                 }
 
                 Divider()
 
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Category Scope")
-                        .font(.caption.weight(.semibold))
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("CATEGORY DESCRIPTION")
+                        .font(.system(size: 10, weight: .bold))
                         .foregroundColor(.secondary)
                     Text(node.category.description)
                         .font(.caption)
@@ -223,37 +246,47 @@ struct TreemapInspectorView: View {
 
                 Spacer()
 
-                if FileManager.default.fileExists(atPath: node.path) {
-                    Button(action: {
-                        NSWorkspace.shared.selectFile(node.path, inFileViewerRootedAtPath: "")
-                    }) {
-                        HStack {
-                            Image(systemName: "arrow.up.forward.square")
-                            Text("Reveal in Finder")
+                VStack(spacing: 8) {
+                    if !node.children.isEmpty {
+                        LiquidGlassButton("Drill Down into Folder", icon: "arrow.down.forward.and.arrow.up.backward") {
+                            appState.drillDownTreemap(to: node)
                         }
-                        .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
+
+                    if FileManager.default.fileExists(atPath: node.path) {
+                        Button(action: {
+                            NSWorkspace.shared.selectFile(node.path, inFileViewerRootedAtPath: "")
+                        }) {
+                            HStack {
+                                Image(systemName: "arrow.up.forward.square")
+                                Text("Reveal in Finder")
+                            }
+                            .frame(maxWidth: .infinity)
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+                    }
                 }
             }
-            .padding(14)
+            .padding(16)
         }
         .background(Color(NSColor.controlBackgroundColor))
     }
 }
 
-struct LabelValueRow: View {
+struct InspectorRow: View {
     let label: String
     let value: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(label)
-                .font(.caption2)
+                .font(.system(size: 10, weight: .medium))
                 .foregroundColor(.secondary)
             Text(value)
                 .font(.system(size: 11, design: .monospaced))
                 .lineLimit(3)
+                .truncationMode(.middle)
         }
     }
 }
