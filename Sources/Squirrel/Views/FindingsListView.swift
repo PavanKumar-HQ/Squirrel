@@ -10,11 +10,14 @@ public struct FindingsListView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Liquid Glass Filter & Search Toolbar
+            // Native Filter & Search Toolbar
             HStack(spacing: 12) {
                 Picker("Filter", selection: Binding(
                     get: { appState.selectedFindingFilterIndex },
-                    set: { appState.selectedFindingFilterIndex = $0 }
+                    set: {
+                        appState.selectedFindingFilterIndex = $0
+                        appState.findingsDisplayLimit = 100
+                    }
                 )) {
                     Text("All (\(appState.findings.count))").tag(0)
                     Text("Safe to Clean (\(safeCount))").tag(1)
@@ -31,12 +34,18 @@ public struct FindingsListView: View {
                         .foregroundColor(.secondary)
                     TextField("Search findings...", text: Binding(
                         get: { appState.findingSearchText },
-                        set: { appState.findingSearchText = $0 }
+                        set: {
+                            appState.findingSearchText = $0
+                            appState.findingsDisplayLimit = 100
+                        }
                     ))
                     .textFieldStyle(.plain)
 
                     if !appState.findingSearchText.isEmpty {
-                        Button(action: { appState.findingSearchText = "" }) {
+                        Button(action: {
+                            appState.findingSearchText = ""
+                            appState.findingsDisplayLimit = 100
+                        }) {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundColor(.secondary)
                         }
@@ -51,9 +60,16 @@ public struct FindingsListView: View {
                 .frame(maxWidth: 240)
 
                 if !appState.selectedFindingIds.isEmpty {
-                    LiquidGlassButton("Clean Selected (\(appState.selectedFindingIds.count))", icon: "trash.fill", isProminent: true, role: .destructive) {
+                    Button(role: .destructive, action: {
                         appState.showFindingConfirmSheet = true
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "trash.fill")
+                            Text("Clean Selected (\(appState.selectedFindingIds.count))")
+                        }
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
                 }
             }
             .padding(.horizontal, 16)
@@ -91,7 +107,7 @@ public struct FindingsListView: View {
                                 }
                             },
                             onToggleExpand: {
-                                withAnimation(.easeInOut(duration: 0.18)) {
+                                withAnimation(.easeInOut(duration: 0.15)) {
                                     if appState.expandedFindingId == finding.id {
                                         appState.expandedFindingId = nil
                                     } else {
@@ -100,6 +116,19 @@ public struct FindingsListView: View {
                                 }
                             }
                         )
+                    }
+
+                    if currentSourceCount > filteredFindings.count {
+                        HStack {
+                            Spacer()
+                            Button("Load 100 More (Showing \(filteredFindings.count) of \(currentSourceCount))") {
+                                appState.findingsDisplayLimit += 100
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.regular)
+                            Spacer()
+                        }
+                        .padding(.vertical, 12)
                     }
                 }
                 .listStyle(.inset)
@@ -123,33 +152,46 @@ public struct FindingsListView: View {
     }
 
     private var safeCount: Int {
-        appState.findings.filter { $0.eligibility == .safeToClean }.count
+        appState.safeCount
     }
 
     private var reviewCount: Int {
-        appState.findings.filter { $0.eligibility == .reviewRecommended }.count
+        appState.reviewCount
     }
 
     private var keepCount: Int {
-        appState.findings.filter { $0.eligibility == .keep }.count
+        appState.keepCount
+    }
+
+    private var currentSource: [Finding] {
+        switch appState.selectedFindingFilterIndex {
+        case 1: return appState.safeFindings
+        case 2: return appState.reviewFindings
+        case 3: return appState.keepFindings
+        default: return appState.findings
+        }
+    }
+
+    private var currentSourceCount: Int {
+        switch appState.selectedFindingFilterIndex {
+        case 1: return appState.safeCount
+        case 2: return appState.reviewCount
+        case 3: return appState.keepCount
+        default: return appState.findings.count
+        }
     }
 
     private var filteredFindings: [Finding] {
-        appState.findings.filter { finding in
-            let matchesFilter: Bool
-            switch appState.selectedFindingFilterIndex {
-            case 0: matchesFilter = true
-            case 1: matchesFilter = finding.eligibility == .safeToClean
-            case 2: matchesFilter = finding.eligibility == .reviewRecommended
-            case 3: matchesFilter = finding.eligibility == .keep
-            default: matchesFilter = true
-            }
-
-            if !matchesFilter { return false }
-            if appState.findingSearchText.isEmpty { return true }
-            return finding.title.localizedCaseInsensitiveContains(appState.findingSearchText) ||
-                   finding.path.localizedCaseInsensitiveContains(appState.findingSearchText) ||
-                   finding.category.rawValue.localizedCaseInsensitiveContains(appState.findingSearchText)
+        let source = currentSource
+        if appState.findingSearchText.isEmpty {
+            return Array(source.prefix(appState.findingsDisplayLimit))
+        } else {
+            let query = appState.findingSearchText
+            return Array(source.filter {
+                $0.title.localizedCaseInsensitiveContains(query) ||
+                $0.path.localizedCaseInsensitiveContains(query) ||
+                $0.category.rawValue.localizedCaseInsensitiveContains(query)
+            }.prefix(appState.findingsDisplayLimit))
         }
     }
 }

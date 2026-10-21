@@ -23,7 +23,7 @@ public struct DashboardView: View {
 
                     Spacer()
 
-                    // Liquid Glass Target Indicator Pill
+                    // Native Target Indicator Pill
                     HStack(spacing: 8) {
                         Image(systemName: "folder.fill")
                             .font(.system(size: 13))
@@ -41,9 +41,11 @@ public struct DashboardView: View {
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(.accentColor)
                     }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 7)
-                    .liquidGlassCapsule(interactive: true)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(8)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.1), lineWidth: 0.8))
                 }
 
                 // 2. Volume Capacity Card
@@ -82,13 +84,13 @@ public struct DashboardView: View {
                     )
                 }
 
-                // 5. Storage Distribution Preview
+                // 5. Storage Distribution Breakdown Bar (Fast, zero-lag overview)
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Storage Distribution")
                                 .font(.title3.weight(.bold))
-                            Text("Proportional squarified treemap visualizes disk allocation from current scan.")
+                            Text("Disk space allocation by category from current scan.")
                                 .font(.caption)
                                 .foregroundColor(.secondary)
                         }
@@ -100,7 +102,7 @@ public struct DashboardView: View {
                                 appState.selectedSection = .treemap
                             }) {
                                 HStack(spacing: 4) {
-                                    Text("Explore Full Treemap")
+                                    Text("Open Interactive Treemap")
                                     Image(systemName: "arrow.right")
                                 }
                                 .font(.caption.weight(.medium))
@@ -114,22 +116,17 @@ public struct DashboardView: View {
                         ZStack {
                             RoundedRectangle(cornerRadius: 10, style: .continuous)
                                 .fill(Color(NSColor.controlBackgroundColor))
-                                .frame(height: 280)
+                                .frame(height: 140)
 
-                            VStack(spacing: 12) {
+                            VStack(spacing: 10) {
                                 Image(systemName: "square.grid.3x3.topleft.filled")
-                                    .font(.system(size: 42))
+                                    .font(.system(size: 32))
                                     .foregroundColor(.secondary.opacity(0.7))
-                                Text("No Storage Data Available")
+                                Text("No Scan Data Available")
                                     .font(.headline)
                                 Text("Run a scan on standard folders or choose a custom directory above.")
                                     .font(.caption)
                                     .foregroundColor(.secondary)
-
-                                LiquidGlassButton("Scan Standard Folders", icon: "arrow.triangle.2.circlepath", isProminent: true) {
-                                    appState.startScan()
-                                }
-                                .padding(.top, 4)
                             }
                         }
                         .overlay(
@@ -137,10 +134,7 @@ public struct DashboardView: View {
                                 .stroke(Color.primary.opacity(0.06), lineWidth: 1)
                         )
                     } else {
-                        TreemapView(appState: appState)
-                            .frame(height: 380)
-                            .cornerRadius(10)
-                            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).stroke(Color.primary.opacity(0.08), lineWidth: 1))
+                        StorageCategoryBreakdownBar(appState: appState)
                     }
                 }
 
@@ -281,11 +275,30 @@ struct VolumeCapacityCard: View {
                 Spacer()
 
                 if scanStatus == .scanning {
-                    LiquidGlassButton("Stop Scan", icon: "xmark.circle.fill", role: .destructive, action: onCancel)
+                    Button(role: .destructive, action: onCancel) {
+                        HStack(spacing: 5) {
+                            Image(systemName: "xmark.circle.fill")
+                            Text("Stop Scan")
+                        }
+                    }
+                    .buttonStyle(.bordered)
                 } else {
-                    LiquidGlassContainer(spacing: 8) {
-                        LiquidGlassButton("Choose Folder...", icon: "folder.badge.gearshape", action: onSelectFolder)
-                        LiquidGlassButton("Scan Standard", icon: "arrow.triangle.2.circlepath", isProminent: true, action: onScanStandard)
+                    HStack(spacing: 8) {
+                        Button(action: onSelectFolder) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "folder.badge.gearshape")
+                                Text("Choose Folder...")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button(action: onScanStandard) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                Text("Scan Standard")
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
                     }
                 }
             }
@@ -309,18 +322,18 @@ struct VolumeCapacityCard: View {
                         ZStack(alignment: .leading) {
                             Capsule()
                                 .fill(Color.secondary.opacity(0.16))
-                                .frame(height: 14)
+                                .frame(height: 12)
 
                             Capsule()
-                                .fill(LinearGradient(colors: [Color.blue, Color.purple], startPoint: .leading, endPoint: .trailing))
-                                .frame(width: max(8, geo.size.width * CGFloat(fractionUsed)), height: 14)
+                                .fill(Color.accentColor)
+                                .frame(width: max(8, geo.size.width * CGFloat(fractionUsed)), height: 12)
                         }
                     }
-                    .frame(height: 14)
+                    .frame(height: 12)
 
                     HStack {
                         HStack(spacing: 6) {
-                            Circle().fill(Color.blue).frame(width: 8, height: 8)
+                            Circle().fill(Color.accentColor).frame(width: 8, height: 8)
                             Text("Used: \(ByteCountFormatter.string(fromByteCount: volume.usedSpace, countStyle: .file)) (\(Int(fractionUsed * 100))%)")
                                 .font(.caption.monospacedDigit())
                         }
@@ -353,6 +366,90 @@ struct VolumeCapacityCard: View {
     }
 }
 
+struct StorageCategoryBreakdownBar: View {
+    @ObservedObject var appState: AppState
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            let categoryTotals = computeCategoryTotals()
+            let totalScanned = categoryTotals.values.reduce(0, +)
+
+            if totalScanned > 0 {
+                // Segmented visual bar
+                GeometryReader { geo in
+                    HStack(spacing: 2) {
+                        ForEach(StorageCategory.allCases, id: \.self) { cat in
+                            let catBytes = categoryTotals[cat] ?? 0
+                            if catBytes > 0 {
+                                let width = max(4, geo.size.width * CGFloat(Double(catBytes) / Double(totalScanned)))
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(SquirrelTheme.color(for: cat))
+                                    .frame(width: width, height: 14)
+                            }
+                        }
+                    }
+                }
+                .frame(height: 14)
+
+                // Category legend chips
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 8) {
+                    ForEach(StorageCategory.allCases, id: \.self) { cat in
+                        let catBytes = categoryTotals[cat] ?? 0
+                        if catBytes > 0 {
+                            HStack(spacing: 6) {
+                                Circle()
+                                    .fill(SquirrelTheme.color(for: cat))
+                                    .frame(width: 8, height: 8)
+                                Text(cat.rawValue)
+                                    .font(.system(size: 11, weight: .medium))
+                                    .lineLimit(1)
+                                Spacer()
+                                Text(ByteCountFormatter.string(fromByteCount: catBytes, countStyle: .file))
+                                    .font(.system(size: 11).monospacedDigit())
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal, 8)
+                            .padding(.vertical, 4)
+                            .background(Color(NSColor.controlBackgroundColor))
+                            .cornerRadius(6)
+                        }
+                    }
+                }
+            } else {
+                Text("No categorized items discovered in current scan.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+        }
+        .padding(14)
+        .solidCard(cornerRadius: 10)
+    }
+
+    private func computeCategoryTotals() -> [StorageCategory: Int64] {
+        var totals: [StorageCategory: Int64] = [:]
+        for item in appState.scannedItems {
+            let cat = determineCategory(for: item)
+            totals[cat, default: 0] += item.allocatedSize
+        }
+        return totals
+    }
+
+    private func determineCategory(for item: StorageItem) -> StorageCategory {
+        let path = item.path.lowercased()
+        if path.contains("/caches/") || path.hasSuffix("/caches") {
+            return .userCaches
+        } else if path.contains("/logs/") || path.hasSuffix(".log") || path.hasSuffix(".diag") || path.hasSuffix(".crash") {
+            return .systemLogs
+        } else if path.hasSuffix(".dmg") || path.hasSuffix(".pkg") || path.hasSuffix(".iso") || path.contains("/downloads/") {
+            return .downloadsAndInstallers
+        } else if item.logicalSize >= 100 * 1024 * 1024 {
+            return .largeFiles
+        } else {
+            return .otherUserData
+        }
+    }
+}
+
 struct ScanProgressCard: View {
     let progress: ScanProgress
     let onCancel: () -> Void
@@ -380,7 +477,7 @@ struct ScanProgressCard: View {
                 .foregroundColor(.red)
         }
         .padding(12)
-        .liquidGlassCard(cornerRadius: 10)
+        .solidCard(cornerRadius: 8)
     }
 }
 
@@ -394,7 +491,7 @@ struct OpportunitiesSummaryCard: View {
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(spacing: 6) {
-                    Image(systemName: "sparkles")
+                    Image(systemName: "checkmark.shield.fill")
                         .foregroundColor(.green)
                     Text("Safe Cleanup Opportunity")
                         .font(.headline)
@@ -413,7 +510,14 @@ struct OpportunitiesSummaryCard: View {
 
             VStack(alignment: .trailing, spacing: 8) {
                 if safeToCleanBytes > 0 {
-                    LiquidGlassButton("Clean Safely (\(ByteCountFormatter.string(fromByteCount: safeToCleanBytes, countStyle: .file)))", icon: "sparkles", isProminent: true, action: onCleanSafely)
+                    Button(action: onCleanSafely) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                            Text("Clean Safely (\(ByteCountFormatter.string(fromByteCount: safeToCleanBytes, countStyle: .file)))")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.green)
                 } else {
                     Text("No Safe Batch Items Found")
                         .font(.caption.weight(.medium))

@@ -51,11 +51,16 @@ public actor DuplicateDetector {
         // Step 4: Full cryptographic SHA-256 hash
         var fullHashGroups: [String: [StorageItem]] = [:]
 
+        var lastHashProgress = Date()
         for cluster in prefixClusters {
             if isCancelled || Task.isCancelled { break }
 
             for item in cluster {
-                progressHandler?("Hashing \(item.name)...")
+                let now = Date()
+                if now.timeIntervalSince(lastHashProgress) >= 0.15 {
+                    lastHashProgress = now
+                    progressHandler?("Hashing \(item.name)...")
+                }
                 if let fullHash = computeFullSHA256(path: item.path) {
                     let key = "\(item.logicalSize)_\(fullHash)"
                     fullHashGroups[key, default: []].append(item)

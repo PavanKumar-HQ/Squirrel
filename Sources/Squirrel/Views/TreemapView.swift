@@ -10,7 +10,7 @@ public struct TreemapView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Liquid Glass Navigation & Breadcrumbs Bar
+            // Navigation & Breadcrumbs Bar
             HStack(spacing: 8) {
                 Button(action: {
                     appState.resetTreemapToOverview()
@@ -60,7 +60,9 @@ public struct TreemapView: View {
                     }
                     .padding(.horizontal, 10)
                     .padding(.vertical, 4)
-                    .liquidGlassCapsule()
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(6)
+                    .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.1), lineWidth: 0.8))
                 }
             }
             .padding(.horizontal, 16)
@@ -74,7 +76,7 @@ public struct TreemapView: View {
                 // Interactive Treemap Canvas
                 GeometryReader { geo in
                     let size = geo.size
-                    let computedRoot = computeLayout(for: appState.activeTreemapRoot, in: CGRect(origin: .zero, size: size))
+                    let computedRoot = computeCachedLayout(for: appState.activeTreemapRoot, in: CGRect(origin: .zero, size: size))
 
                     ZStack(alignment: .topLeading) {
                         Color(NSColor.underPageBackgroundColor)
@@ -108,7 +110,15 @@ public struct TreemapView: View {
                                 .frame(width: max(0, child.rect.width), height: max(0, child.rect.height))
                                 .offset(x: child.rect.minX, y: child.rect.minY)
                                 .onHover { hovering in
-                                    appState.hoveredTreemapNodeId = hovering ? child.id : nil
+                                    if hovering {
+                                        if appState.hoveredTreemapNodeId != child.id {
+                                            appState.hoveredTreemapNodeId = child.id
+                                        }
+                                    } else {
+                                        if appState.hoveredTreemapNodeId == child.id {
+                                            appState.hoveredTreemapNodeId = nil
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -125,9 +135,13 @@ public struct TreemapView: View {
         }
     }
 
-    private func computeLayout(for node: TreemapNode, in bounds: CGRect) -> TreemapNode {
+    private func computeCachedLayout(for node: TreemapNode, in bounds: CGRect) -> TreemapNode {
+        if let cached = appState.treemapCachedLayout, cached.rootId == node.id, cached.size == bounds.size {
+            return cached.node
+        }
         var mutable = node
         TreemapEngine.layoutSquarified(node: &mutable, bounds: bounds)
+        appState.treemapCachedLayout = (node.id, bounds.size, mutable)
         return mutable
     }
 }
@@ -143,23 +157,15 @@ struct TreemapTileView: View {
         ZStack(alignment: .topLeading) {
             RoundedRectangle(cornerRadius: 6, style: .continuous)
                 .fill(
-                    LinearGradient(
-                        colors: [
-                            SquirrelTheme.color(for: node.category),
-                            SquirrelTheme.color(for: node.category).opacity(0.85)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
+                    SquirrelTheme.color(for: node.category)
                 )
                 .overlay(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
                         .stroke(
-                            isSelected ? Color.white : (isHovered ? Color.white.opacity(0.6) : Color.black.opacity(0.12)),
-                            lineWidth: isSelected ? 2.5 : 0.8
+                            isSelected ? Color.white : (isHovered ? Color.white.opacity(0.8) : Color.black.opacity(0.15)),
+                            lineWidth: isSelected ? 2.5 : (isHovered ? 1.5 : 0.8)
                         )
                 )
-                .shadow(color: isSelected ? Color.black.opacity(0.2) : Color.clear, radius: 4, x: 0, y: 2)
 
             if node.rect.width > 54 && node.rect.height > 32 {
                 VStack(alignment: .leading, spacing: 2) {
@@ -168,7 +174,7 @@ struct TreemapTileView: View {
                             .font(.system(size: 11, weight: .bold))
                             .lineLimit(1)
                             .foregroundColor(.white)
-                            .shadow(color: Color.black.opacity(0.4), radius: 1, x: 0, y: 1)
+                            .shadow(color: Color.black.opacity(0.5), radius: 1, x: 0, y: 1)
 
                         if !node.children.isEmpty && node.rect.width > 90 {
                             Image(systemName: "arrow.down.right.and.arrow.up.left")
@@ -179,9 +185,9 @@ struct TreemapTileView: View {
 
                     if node.rect.height > 46 {
                         Text(ByteCountFormatter.string(fromByteCount: node.size, countStyle: .file))
-                            .font(.system(size: 10, weight: .medium).monospacedDigit())
-                            .foregroundColor(.white.opacity(0.92))
-                            .shadow(color: Color.black.opacity(0.4), radius: 1, x: 0, y: 1)
+                            .font(.system(size: 10, weight: .semibold).monospacedDigit())
+                            .foregroundColor(.white.opacity(0.95))
+                            .shadow(color: Color.black.opacity(0.5), radius: 1, x: 0, y: 1)
                     }
 
                     if !node.children.isEmpty && node.rect.height > 70 && node.rect.width > 110 {

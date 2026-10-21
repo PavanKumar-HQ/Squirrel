@@ -209,12 +209,15 @@ public actor FilesystemScanner {
             return
         }
 
+        var lastProgressDate = Date()
         while let nextObj = fileEnumerator.nextObject() {
             guard let fileURL = nextObj as? URL else { continue }
             if isCancelled || Task.isCancelled { break }
 
             itemCount += 1
-            if itemCount % 250 == 0 {
+            let now = Date()
+            if now.timeIntervalSince(lastProgressDate) >= 0.1 {
+                lastProgressDate = now
                 let currentTotal = totalLogical
                 let count = itemCount
                 let currentP = fileURL.path

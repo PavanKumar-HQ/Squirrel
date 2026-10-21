@@ -427,6 +427,42 @@ await runAsyncTest("Hierarchical Container Cascading Deletion") {
     assertTest(summary.itemsFailedCount == 0, "Zero failures (no errno: 2 on child leaf)")
 }
 
+// Test 15: Progress Pacing & Performance Pacing
+await runAsyncTest("Scanner Progress Pacing & Throttle Check") {
+    let pacingDir = tempDir.appendingPathComponent("PacingTest_\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: pacingDir, withIntermediateDirectories: true)
+
+    // Create 100 small files to test traversal throttling
+    for i in 1...100 {
+        let f = pacingDir.appendingPathComponent("file_\(i).txt")
+        try "pacing test".data(using: .utf8)!.write(to: f)
+    }
+
+    final class Counter: @unchecked Sendable {
+        private let lock = NSLock()
+        private var val = 0
+        func increment() {
+            lock.lock()
+            val += 1
+            lock.unlock()
+        }
+        var count: Int {
+            lock.lock()
+            defer { lock.unlock() }
+            return val
+        }
+    }
+    let counter = Counter()
+    let scanner = FilesystemScanner()
+    let result = await scanner.scan(roots: [pacingDir]) { _ in
+        counter.increment()
+    }
+
+    assertTest(result.completedNormally, "Pacing scan completed normally")
+    assertTest(result.items.count == 100, "All 100 items discovered")
+    assertTest(counter.count <= 20, "Progress handler was properly throttled (called \(counter.count) times for 100 fast files)")
+}
+
 print("\n==================================================")
 print("  Test Results: \(passedCount) Passed, \(failedCount) Failed")
 print("==================================================")

@@ -43,7 +43,6 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     @Published public var selectedFindingFilterIndex: Int = 0
     @Published public var findingSearchText: String = ""
     @Published public var expandedFindingId: UUID? = nil
-    @Published public var hoveredTreemapNodeId: UUID? = nil
     @Published public var selectedHistoryTab: Int = 0
 
     // Volume metrics
@@ -60,6 +59,12 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     // Findings and Data
     @Published public var scannedItems: [StorageItem] = []
     @Published public var findings: [Finding] = []
+    @Published public var safeFindings: [Finding] = []
+    @Published public var reviewFindings: [Finding] = []
+    @Published public var keepFindings: [Finding] = []
+    @Published public var safeCount: Int = 0
+    @Published public var reviewCount: Int = 0
+    @Published public var keepCount: Int = 0
     @Published public var duplicateGroups: [DuplicateGroup] = []
     @Published public var inaccessibleLocations: [InaccessibleLocation] = []
     @Published public var treemapRoot: TreemapNode = TreemapNode(name: "Storage", path: "/", size: 0, category: .otherUserData, isDirectory: true)
@@ -67,9 +72,15 @@ public final class AppState: ObservableObject, @unchecked Sendable {
 
     // Selection
     @Published public var selectedTreemapNode: TreemapNode? = nil
+    @Published public var hoveredTreemapNodeId: UUID? = nil
     @Published public var treemapBreadcrumbs: [TreemapNode] = []
     @Published public var selectedFindingIds: Set<UUID> = []
     @Published public var selectedDuplicatePaths: Set<String> = []
+
+    // Pagination & Treemap Layout Cache
+    @Published public var findingsDisplayLimit: Int = 100
+    @Published public var duplicatesDisplayLimit: Int = 50
+    public var treemapCachedLayout: (rootId: UUID, size: CGSize, node: TreemapNode)? = nil
 
     // Cleanup Execution State
     @Published public var isCleaning: Bool = false
@@ -164,20 +175,28 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 }
             }
 
-            // Classify findings
+            // Classify findings and partition in background
             var computedFindings: [Finding] = []
+            var safeList: [Finding] = []
+            var reviewList: [Finding] = []
+            var keepList: [Finding] = []
+
             let rules = ClassificationRules.shared
             let inaccessiblePaths = Set(result.inaccessibleLocations.map { $0.path })
             for item in result.items {
                 if let finding = rules.classify(item: item, inaccessiblePaths: inaccessiblePaths) {
                     computedFindings.append(finding)
+                    switch finding.eligibility {
+                    case .safeToClean: safeList.append(finding)
+                    case .reviewRecommended: reviewList.append(finding)
+                    case .keep: keepList.append(finding)
+                    }
                 }
             }
 
             // Build Treemap Hierarchy
             let rootTreemap = TreemapEngine.buildHierarchy(from: result.items)
 
-            // Detect duplicates on regular candidate files
             let duplicates = await duplicateDetector.findDuplicates(items: result.items) { msg in
                 Task { @MainActor in
                     self.scanProgress = ScanProgress(
@@ -190,11 +209,21 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 }
             }
 
+            // Sort all collections once in background by allocated size
             let finalFindings = computedFindings.sorted { $0.allocatedSize > $1.allocatedSize }
+            let finalSafe = safeList.sorted { $0.allocatedSize > $1.allocatedSize }
+            let finalReview = reviewList.sorted { $0.allocatedSize > $1.allocatedSize }
+            let finalKeep = keepList.sorted { $0.allocatedSize > $1.allocatedSize }
 
             await MainActor.run {
                 self.scannedItems = result.items
                 self.findings = finalFindings
+                self.safeFindings = finalSafe
+                self.reviewFindings = finalReview
+                self.keepFindings = finalKeep
+                self.safeCount = finalSafe.count
+                self.reviewCount = finalReview.count
+                self.keepCount = finalKeep.count
                 self.duplicateGroups = duplicates
                 self.inaccessibleLocations = result.inaccessibleLocations
                 self.treemapRoot = rootTreemap

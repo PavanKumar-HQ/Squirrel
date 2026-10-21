@@ -10,7 +10,7 @@ public struct DuplicatesView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            // Liquid Glass Header Toolbar
+            // Header Toolbar
             HStack(spacing: 12) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("Exact Duplicate Files")
@@ -31,17 +31,21 @@ public struct DuplicatesView: View {
                 }
                 .padding(.horizontal, 10)
                 .padding(.vertical, 4)
-                .liquidGlassCapsule()
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(6)
+                .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.1), lineWidth: 0.8))
 
                 if !appState.selectedDuplicatePaths.isEmpty {
-                    LiquidGlassButton(
-                        "Trash Selected (\(appState.selectedDuplicatePaths.count))",
-                        icon: "trash.fill",
-                        isProminent: true,
-                        role: .destructive
-                    ) {
+                    Button(role: .destructive, action: {
                         appState.showDuplicateConfirmSheet = true
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "trash.fill")
+                            Text("Trash Selected (\(appState.selectedDuplicatePaths.count))")
+                        }
                     }
+                    .buttonStyle(.borderedProminent)
+                    .tint(.red)
                 }
             }
             .padding(.horizontal, 16)
@@ -66,7 +70,8 @@ public struct DuplicatesView: View {
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 List {
-                    ForEach(appState.duplicateGroups) { group in
+                    let displayedGroups = Array(appState.duplicateGroups.prefix(appState.duplicatesDisplayLimit))
+                    ForEach(displayedGroups) { group in
                         DuplicateGroupSectionView(
                             group: group,
                             selectedPaths: Binding(
@@ -74,6 +79,19 @@ public struct DuplicatesView: View {
                                 set: { appState.selectedDuplicatePaths = $0 }
                             )
                         )
+                    }
+
+                    if appState.duplicateGroups.count > appState.duplicatesDisplayLimit {
+                        HStack {
+                            Spacer()
+                            Button("Load 50 More (Showing \(displayedGroups.count) of \(appState.duplicateGroups.count) groups)") {
+                                appState.duplicatesDisplayLimit += 50
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.regular)
+                            Spacer()
+                        }
+                        .padding(.vertical, 12)
                     }
                 }
                 .listStyle(.inset)

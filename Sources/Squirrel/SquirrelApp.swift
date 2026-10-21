@@ -108,7 +108,7 @@ public struct SquirrelApp: App {
                                     .fill(Color.secondary.opacity(0.15))
                                     .frame(height: 5)
                                 Capsule()
-                                    .fill(LinearGradient(colors: [Color.blue, Color.purple], startPoint: .leading, endPoint: .trailing))
+                                    .fill(Color.accentColor)
                                     .frame(width: max(4, g.size.width * CGFloat(fraction)), height: 5)
                             }
                         }
