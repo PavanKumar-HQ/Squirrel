@@ -9,6 +9,7 @@ public struct VolumeSpace: Codable, Sendable, Equatable {
     public let usedSpace: Int64
     public let volumeName: String
     public let mountPoint: String
+    public let measurementSource: String
 
     public init(
         totalCapacity: Int64,
@@ -17,7 +18,8 @@ public struct VolumeSpace: Codable, Sendable, Equatable {
         opportunisticAvailableCapacity: Int64,
         usedSpace: Int64,
         volumeName: String,
-        mountPoint: String
+        mountPoint: String,
+        measurementSource: String = "Foundation URLResourceValues (APFS)"
     ) {
         self.totalCapacity = totalCapacity
         self.availableCapacity = availableCapacity
@@ -26,13 +28,18 @@ public struct VolumeSpace: Codable, Sendable, Equatable {
         self.usedSpace = usedSpace
         self.volumeName = volumeName
         self.mountPoint = mountPoint
+        self.measurementSource = measurementSource
     }
 
     /// Queries the actual macOS volume metrics for the primary system root.
     public static func querySystemVolume() -> VolumeSpace {
-        let rootURL = URL(fileURLWithPath: "/")
+        return queryVolume(at: URL(fileURLWithPath: "/"))
+    }
+
+    /// Queries actual volume metrics for any specified mount point or URL.
+    public static func queryVolume(at url: URL) -> VolumeSpace {
         do {
-            let values = try rootURL.resourceValues(forKeys: [
+            let values = try url.resourceValues(forKeys: [
                 .volumeTotalCapacityKey,
                 .volumeAvailableCapacityKey,
                 .volumeAvailableCapacityForImportantUsageKey,
@@ -53,12 +60,13 @@ public struct VolumeSpace: Codable, Sendable, Equatable {
                 opportunisticAvailableCapacity: opportunistic,
                 usedSpace: used,
                 volumeName: name,
-                mountPoint: "/"
+                mountPoint: url.path,
+                measurementSource: "Foundation URLResourceValues (APFS)"
             )
         } catch {
             // Fallback to POSIX statvfs
             var stats = statvfs()
-            if statvfs("/", &stats) == 0 {
+            if statvfs(url.path, &stats) == 0 {
                 let blockSize = Int64(stats.f_frsize)
                 let total = Int64(stats.f_blocks) * blockSize
                 let free = Int64(stats.f_bavail) * blockSize
@@ -69,8 +77,9 @@ public struct VolumeSpace: Codable, Sendable, Equatable {
                     importantAvailableCapacity: free,
                     opportunisticAvailableCapacity: free,
                     usedSpace: used,
-                    volumeName: "Macintosh HD",
-                    mountPoint: "/"
+                    volumeName: url.lastPathComponent.isEmpty ? "Macintosh HD" : url.lastPathComponent,
+                    mountPoint: url.path,
+                    measurementSource: "Darwin POSIX statvfs"
                 )
             }
             return VolumeSpace(
@@ -79,8 +88,9 @@ public struct VolumeSpace: Codable, Sendable, Equatable {
                 importantAvailableCapacity: 0,
                 opportunisticAvailableCapacity: 0,
                 usedSpace: 0,
-                volumeName: "Macintosh HD",
-                mountPoint: "/"
+                volumeName: "Unknown",
+                mountPoint: url.path,
+                measurementSource: "Unavailable"
             )
         }
     }
