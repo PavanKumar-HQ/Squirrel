@@ -2,31 +2,34 @@
 import PackageDescription
 
 let package = Package(
-    name: "StorageCleaner",
+    name: "Squirrel",
     platforms: [
         .macOS(.v14)
     ],
     products: [
-        .executable(name: "StorageCleaner", targets: ["StorageCleaner"]),
-        .library(name: "StorageCleanerCore", targets: ["StorageCleanerCore"]),
-        .executable(name: "StorageCleanerTests", targets: ["StorageCleanerTests"])
+        .executable(name: "Squirrel", targets: ["Squirrel"]),
+        .library(name: "SquirrelCore", targets: ["SquirrelCore"]),
+        .executable(name: "SquirrelTests", targets: ["SquirrelTests"])
     ],
     dependencies: [],
     targets: [
         .target(
-            name: "StorageCleanerCore",
+            name: "SquirrelCore",
             dependencies: [],
-            path: "Sources/StorageCleanerCore"
+            path: "Sources/SquirrelCore"
         ),
         .executableTarget(
-            name: "StorageCleaner",
-            dependencies: ["StorageCleanerCore"],
-            path: "Sources/StorageCleaner"
+            name: "Squirrel",
+            dependencies: ["SquirrelCore"],
+            path: "Sources/Squirrel",
+            resources: [
+                .process("Resources")
+            ]
         ),
         .executableTarget(
-            name: "StorageCleanerTests",
-            dependencies: ["StorageCleanerCore"],
-            path: "Tests/StorageCleanerTests"
+            name: "SquirrelTests",
+            dependencies: ["SquirrelCore"],
+            path: "Tests/SquirrelTests"
         )
     ]
 )

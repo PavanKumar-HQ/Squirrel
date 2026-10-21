@@ -1,7 +1,7 @@
 import Foundation
 import SwiftUI
 import Combine
-import StorageCleanerCore
+import SquirrelCore
 
 public enum ScanStatus: String, Sendable {
     case idle = "Not Scanned"

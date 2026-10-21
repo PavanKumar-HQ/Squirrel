@@ -1,5 +1,5 @@
 import SwiftUI
-import StorageCleanerCore
+import SquirrelCore
 
 public struct InaccessibleLocationsView: View {
     @ObservedObject var appState: AppState
@@ -67,7 +67,7 @@ public struct InaccessibleLocationsView: View {
             HStack(spacing: 12) {
                 Image(systemName: "info.circle")
                     .foregroundColor(.accentColor)
-                Text("To inspect protected directories such as Mail, Safari, and Messages caches, you can optionally grant Full Disk Access to StorageCleaner in macOS System Settings > Privacy & Security > Full Disk Access.")
+                Text("To inspect protected directories such as Mail, Safari, and Messages caches, you can optionally grant Full Disk Access to Squirrel in macOS System Settings > Privacy & Security > Full Disk Access.")
                     .font(.caption)
                     .foregroundColor(.secondary)
                 Spacer()

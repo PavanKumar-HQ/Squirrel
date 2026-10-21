@@ -2,16 +2,17 @@
 set -euo pipefail
 
 echo "=================================================="
-echo "  Building Universal macOS Release: StorageCleaner"
+echo "  Building Universal macOS Release: Squirrel"
+echo "  'A little more room for your Mac.'"
 echo "=================================================="
 
 WORKSPACE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="${WORKSPACE_DIR}/dist"
-APP_BUNDLE="${DIST_DIR}/StorageCleaner.app"
+APP_BUNDLE="${DIST_DIR}/Squirrel.app"
 CONTENTS_DIR="${APP_BUNDLE}/Contents"
 MACOS_DIR="${CONTENTS_DIR}/MacOS"
 RESOURCES_DIR="${CONTENTS_DIR}/Resources"
-DMG_PATH="${DIST_DIR}/StorageCleaner.dmg"
+DMG_PATH="${DIST_DIR}/Squirrel.dmg"
 
 rm -rf "${DIST_DIR}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
@@ -22,16 +23,26 @@ swift build -c release --triple arm64-apple-macosx14.0 --scratch-path "${WORKSPA
 echo "[2/6] Compiling x86_64 (Intel) target..."
 swift build -c release --triple x86_64-apple-macosx14.0 --scratch-path "${WORKSPACE_DIR}/.build/x86_64"
 
-ARM64_BIN="$(find "${WORKSPACE_DIR}/.build/arm64" -type f -name "StorageCleaner" | grep -v "dSYM" | head -n 1)"
-X86_BIN="$(find "${WORKSPACE_DIR}/.build/x86_64" -type f -name "StorageCleaner" | grep -v "dSYM" | head -n 1)"
+ARM64_BIN="$(find "${WORKSPACE_DIR}/.build/arm64" -type f -name "Squirrel" | grep -v "dSYM" | head -n 1)"
+X86_BIN="$(find "${WORKSPACE_DIR}/.build/x86_64" -type f -name "Squirrel" | grep -v "dSYM" | head -n 1)"
 
 echo "[3/6] Merging into Universal 2 binary with lipo..."
-lipo -create "${ARM64_BIN}" "${X86_BIN}" -output "${MACOS_DIR}/StorageCleaner"
-chmod +x "${MACOS_DIR}/StorageCleaner"
+lipo -create "${ARM64_BIN}" "${X86_BIN}" -output "${MACOS_DIR}/Squirrel"
+chmod +x "${MACOS_DIR}/Squirrel"
+
+# Copy AppIcon into Resources
+if [ -f "${WORKSPACE_DIR}/Resources/AppIcon.icns" ]; then
+    cp "${WORKSPACE_DIR}/Resources/AppIcon.icns" "${RESOURCES_DIR}/AppIcon.icns"
+fi
+
+# Copy bundled swift resources if present
+if [ -d "${WORKSPACE_DIR}/.build/arm64/release/Squirrel_Squirrel.bundle" ]; then
+    cp -R "${WORKSPACE_DIR}/.build/arm64/release/Squirrel_Squirrel.bundle" "${RESOURCES_DIR}/"
+fi
 
 echo "Binary Architecture Verification:"
-lipo -info "${MACOS_DIR}/StorageCleaner"
-file "${MACOS_DIR}/StorageCleaner"
+lipo -info "${MACOS_DIR}/Squirrel"
+file "${MACOS_DIR}/Squirrel"
 
 echo "[4/6] Creating Info.plist..."
 cat << 'EOF' > "${CONTENTS_DIR}/Info.plist"
@@ -42,13 +53,17 @@ cat << 'EOF' > "${CONTENTS_DIR}/Info.plist"
     <key>CFBundleDevelopmentRegion</key>
     <string>en</string>
     <key>CFBundleExecutable</key>
-    <string>StorageCleaner</string>
+    <string>Squirrel</string>
     <key>CFBundleIdentifier</key>
-    <string>com.localfirst.storagecleaner</string>
+    <string>com.localfirst.squirrel</string>
     <key>CFBundleInfoDictionaryVersion</key>
     <string>6.0</string>
     <key>CFBundleName</key>
-    <string>StorageCleaner</string>
+    <string>Squirrel</string>
+    <key>CFBundleDisplayName</key>
+    <string>Squirrel</string>
+    <key>CFBundleIconFile</key>
+    <string>AppIcon</string>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
@@ -68,7 +83,6 @@ cat << 'EOF' > "${CONTENTS_DIR}/Info.plist"
 EOF
 
 echo "[5/6] Code signing application bundle..."
-# Ad-hoc sign for local execution; Developer ID certificate can be passed via SIGN_IDENTITY env var
 SIGN_ID="${SIGN_IDENTITY:--}"
 codesign --force --deep --sign "${SIGN_ID}" "${APP_BUNDLE}"
 
@@ -77,13 +91,13 @@ codesign --verify --deep --strict --verbose=2 "${APP_BUNDLE}"
 
 echo "[6/6] Generating distributable DMG..."
 rm -f "${DMG_PATH}"
-hdiutil create -volname "StorageCleaner" -srcfolder "${APP_BUNDLE}" -ov -format UDZO "${DMG_PATH}"
+hdiutil create -volname "Squirrel" -srcfolder "${APP_BUNDLE}" -ov -format UDZO "${DMG_PATH}"
 
 echo "Verifying DMG:"
 hdiutil verify "${DMG_PATH}"
 
 echo "=================================================="
 echo "  Build & Packaging Succeeded!"
-echo "  Bundle: ${APP_BUNDLE}"
-echo "  DMG:    ${DMG_PATH}"
+echo "  App: ${APP_BUNDLE}"
+echo "  DMG: ${DMG_PATH}"
 echo "=================================================="

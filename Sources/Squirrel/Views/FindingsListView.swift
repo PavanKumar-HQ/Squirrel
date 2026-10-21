@@ -1,5 +1,5 @@
 import SwiftUI
-import StorageCleanerCore
+import SquirrelCore
 
 public struct FindingsListView: View {
     @ObservedObject var appState: AppState

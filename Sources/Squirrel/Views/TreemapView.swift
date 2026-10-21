@@ -1,5 +1,5 @@
 import SwiftUI
-import StorageCleanerCore
+import SquirrelCore
 
 public struct TreemapView: View {
     @ObservedObject var appState: AppState

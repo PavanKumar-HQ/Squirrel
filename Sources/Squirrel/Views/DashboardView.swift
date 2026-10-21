@@ -1,5 +1,5 @@
 import SwiftUI
-import StorageCleanerCore
+import SquirrelCore
 
 public struct DashboardView: View {
     @ObservedObject var appState: AppState
@@ -11,6 +11,37 @@ public struct DashboardView: View {
     public var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 20) {
+                // Squirrel Brand Header
+                HStack(spacing: 14) {
+                    if let imagePath = Bundle.module.path(forResource: "AppIcon", ofType: "png"),
+                       let nsImg = NSImage(contentsOfFile: imagePath) {
+                        Image(nsImage: nsImg)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(width: 48, height: 48)
+                            .cornerRadius(10)
+                    } else {
+                        ZStack {
+                            RoundedRectangle(cornerRadius: 10)
+                                .fill(Color(red: 0.65, green: 0.42, blue: 0.22))
+                                .frame(width: 48, height: 48)
+                            Image(systemName: "leaf.fill")
+                                .font(.title2)
+                                .foregroundColor(.white)
+                        }
+                    }
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Squirrel")
+                            .font(.system(size: 22, weight: .bold))
+                        Text("A little more room for your Mac.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.bottom, 2)
+
                 // 1. Storage Capacity Card
                 VolumeCapacityCard(
                     volume: appState.volumeSpace,

@@ -1,5 +1,5 @@
 import SwiftUI
-import StorageCleanerCore
+import SquirrelCore
 
 public struct HistoryView: View {
     @ObservedObject var appState: AppState

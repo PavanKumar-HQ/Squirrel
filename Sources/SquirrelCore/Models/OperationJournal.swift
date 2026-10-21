@@ -65,7 +65,7 @@ public final class JournalManager: @unchecked Sendable {
             self.storageURL = customStorageURL
         } else {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            let appDir = appSupport.appendingPathComponent("StorageCleaner", isDirectory: true)
+            let appDir = appSupport.appendingPathComponent("Squirrel", isDirectory: true)
             try? FileManager.default.createDirectory(at: appDir, withIntermediateDirectories: true)
             self.storageURL = appDir.appendingPathComponent("operation_journal.json")
         }

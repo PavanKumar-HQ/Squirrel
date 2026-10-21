@@ -1,5 +1,5 @@
 import SwiftUI
-import StorageCleanerCore
+import SquirrelCore
 
 public struct DuplicatesView: View {
     @ObservedObject var appState: AppState

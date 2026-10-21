@@ -1,5 +1,5 @@
 import Foundation
-import StorageCleanerCore
+import SquirrelCore
 
 var passedCount = 0
 var failedCount = 0
@@ -25,14 +25,15 @@ func runAsyncTest(_ name: String, block: () async throws -> Void) async {
 }
 
 // Setup isolated temp fixture directory
-let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("StorageCleanerTestSuite_\(UUID().uuidString)", isDirectory: true)
+let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("SquirrelTestSuite_\(UUID().uuidString)", isDirectory: true)
 try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
 defer {
     try? FileManager.default.removeItem(at: tempDir)
 }
 
 print("==================================================")
-print("  StorageCleaner Automated Test Suite Runner")
+print("  Squirrel Automated Test Suite Runner")
+print("  'A little more room for your Mac.'")
 print("==================================================")
 
 // Test 1: Volume Storage Query

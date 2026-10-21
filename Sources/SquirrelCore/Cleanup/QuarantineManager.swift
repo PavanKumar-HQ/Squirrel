@@ -42,7 +42,7 @@ public actor QuarantineManager {
             base = customBaseDir
         } else {
             let appSupport = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            base = appSupport.appendingPathComponent("StorageCleaner", isDirectory: true)
+            base = appSupport.appendingPathComponent("Squirrel", isDirectory: true)
         }
         self.quarantineDir = base.appendingPathComponent("Quarantine", isDirectory: true)
         self.manifestURL = quarantineDir.appendingPathComponent("quarantine_manifest.json")

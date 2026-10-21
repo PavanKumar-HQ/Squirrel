@@ -1,8 +1,8 @@
 import SwiftUI
-import StorageCleanerCore
+import SquirrelCore
 
 @main
-public struct StorageCleanerApp: App {
+public struct SquirrelApp: App {
     @ObservedObject private var appState = AppState.shared
 
     public init() {}
@@ -22,7 +22,7 @@ public struct StorageCleanerApp: App {
                         }
                     }
                 }
-                .navigationTitle("StorageCleaner")
+                .navigationTitle("Squirrel")
                 .listStyle(.sidebar)
             } detail: {
                 Group {
