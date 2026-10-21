@@ -17,6 +17,7 @@ public enum NavigationSection: String, CaseIterable, Identifiable {
     case duplicates = "Exact Duplicates"
     case history = "History & Quarantine"
     case permissions = "Inaccessible Areas"
+    case diagnostics = "Diagnostics & Efficiency"
 
     public var id: String { rawValue }
 
@@ -28,6 +29,7 @@ public enum NavigationSection: String, CaseIterable, Identifiable {
         case .duplicates: return "doc.on.doc"
         case .history: return "clock.arrow.circlepath"
         case .permissions: return "lock.shield"
+        case .diagnostics: return "speedometer"
         }
     }
 }
@@ -92,6 +94,15 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     @Published public var journalEntries: [JournalEntry] = []
     @Published public var quarantineRecords: [QuarantineRecord] = []
 
+    // Diagnostics & Efficiency Telemetry
+    @Published public var lastScanPerformance: ScanPerformanceRecord? = nil
+    @Published public var recentBenchmarkRecords: [ScanPerformanceRecord] = []
+    @Published public var lastControlledBenchmark: BenchmarkComparison? = nil
+    @Published public var currentProcessTelemetry: ProcessTelemetry = ProcessTelemetry()
+    @Published public var isRunningBenchmark: Bool = false
+    @Published public var benchmarkStatusText: String = ""
+    public var lastScanDuration: TimeInterval = 0
+
     // Core Engines
     private let scanner = FilesystemScanner()
     private let duplicateDetector = DuplicateDetector()
@@ -101,6 +112,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     public init() {
         refreshVolumeMetrics()
         refreshHistory()
+        refreshTelemetry()
     }
 
     public func refreshVolumeMetrics(for url: URL? = nil) {
@@ -125,6 +137,12 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 self.quarantineRecords = records
             }
         }
+    }
+
+    public func refreshTelemetry() {
+        self.currentProcessTelemetry = SystemTelemetry.captureCurrentProcessTelemetry()
+        self.recentBenchmarkRecords = BenchmarkManager.shared.getRecentRecords()
+        self.lastControlledBenchmark = BenchmarkManager.shared.getLastBenchmarkComparison()
     }
 
     // MARK: - Safe Scan Execution
@@ -173,6 +191,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         self.scanTargetDescription = description
 
         Task {
+            let startFootprint = SystemTelemetry.captureCurrentProcessTelemetry().physicalFootprint
             let validRoots = roots.filter { fileManager.fileExists(atPath: $0.path) && fileManager.isReadableFile(atPath: $0.path) }
 
             let result = await scanner.scan(roots: validRoots) { progress in
@@ -221,6 +240,18 @@ public final class AppState: ObservableObject, @unchecked Sendable {
             let finalReview = reviewList.sorted { $0.allocatedSize > $1.allocatedSize }
             let finalKeep = keepList.sorted { $0.allocatedSize > $1.allocatedSize }
 
+            let peakFootprint = SystemTelemetry.captureCurrentProcessTelemetry().physicalFootprint
+            let perfRecord = ScanPerformanceRecord(
+                targetDescription: description,
+                itemCount: result.items.count,
+                totalLogicalBytes: result.totalLogicalBytes,
+                durationSeconds: result.scanDurationSeconds,
+                startPhysicalFootprint: startFootprint,
+                peakPhysicalFootprint: peakFootprint,
+                completedNormally: result.completedNormally
+            )
+            BenchmarkManager.shared.recordScan(perfRecord)
+
             await MainActor.run {
                 self.scannedItems = result.items
                 self.findings = finalFindings
@@ -237,7 +268,10 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 self.selectedTreemapNode = rootTreemap.children.first
                 self.scanStatus = result.completedNormally ? .completed : .cancelled
                 self.lastScanDate = Date()
+                self.lastScanDuration = result.scanDurationSeconds
+                self.lastScanPerformance = perfRecord
                 self.refreshVolumeMetrics()
+                self.refreshTelemetry()
             }
         }
     }
@@ -258,8 +292,16 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         isCleaning = true
         cleanupProgress = CleanupProgress(completedCount: 0, totalCount: 1, currentItemName: "Validating safe items...")
 
+        let currentFindings = self.findings
+        let duration = self.lastScanDuration
+        let targetURL = self.customScanRootURL ?? URL(fileURLWithPath: "/")
+
         Task {
-            let summary = await cleanupEngine.executeSafeBatch(findings: findings) { prog in
+            let summary = await cleanupEngine.executeSafeBatch(
+                findings: currentFindings,
+                scanDuration: duration,
+                targetVolumeURL: targetURL
+            ) { prog in
                 Task { @MainActor in
                     self.cleanupProgress = prog
                 }
@@ -271,6 +313,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 self.showCleanupSummarySheet = true
                 self.refreshHistory()
                 self.refreshVolumeMetrics()
+                self.refreshTelemetry()
 
                 let succeededPaths = Set(self.journalEntries.filter { $0.status == .success }.map { $0.originalPath })
                 self.findings.removeAll { succeededPaths.contains($0.path) }
@@ -285,9 +328,17 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         guard !isCleaning, !selectedFindingIds.isEmpty else { return }
         isCleaning = true
         let selected = findings.filter { selectedFindingIds.contains($0.id) }
+        let allCount = findings.count
+        let duration = self.lastScanDuration
+        let targetURL = self.customScanRootURL ?? URL(fileURLWithPath: "/")
 
         Task {
-            let summary = await cleanupEngine.executeSelected(findings: selected) { prog in
+            let summary = await cleanupEngine.executeSelected(
+                findings: selected,
+                allDiscoveredCount: allCount,
+                scanDuration: duration,
+                targetVolumeURL: targetURL
+            ) { prog in
                 Task { @MainActor in
                     self.cleanupProgress = prog
                 }
@@ -300,6 +351,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 self.selectedFindingIds.removeAll()
                 self.refreshHistory()
                 self.refreshVolumeMetrics()
+                self.refreshTelemetry()
 
                 let succeededPaths = Set(self.journalEntries.filter { $0.status == .success }.map { $0.originalPath })
                 self.findings.removeAll { succeededPaths.contains($0.path) }
@@ -315,7 +367,9 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         isCleaning = true
 
         var membersToDelete: [DuplicateMember] = []
+        var totalCopies = 0
         for group in duplicateGroups {
+            totalCopies += group.files.count
             for member in group.files {
                 if selectedDuplicatePaths.contains(member.path) {
                     membersToDelete.append(member)
@@ -323,8 +377,16 @@ public final class AppState: ObservableObject, @unchecked Sendable {
             }
         }
 
+        let duration = self.lastScanDuration
+        let targetURL = self.customScanRootURL ?? URL(fileURLWithPath: "/")
+
         Task {
-            let summary = await cleanupEngine.deleteDuplicateCopies(members: membersToDelete) { prog in
+            let summary = await cleanupEngine.deleteDuplicateCopies(
+                members: membersToDelete,
+                totalCandidateCopiesCount: totalCopies,
+                scanDuration: duration,
+                targetVolumeURL: targetURL
+            ) { prog in
                 Task { @MainActor in
                     self.cleanupProgress = prog
                 }
@@ -337,6 +399,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 self.selectedDuplicatePaths.removeAll()
                 self.refreshHistory()
                 self.refreshVolumeMetrics()
+                self.refreshTelemetry()
 
                 let succeededPaths = Set(self.journalEntries.filter { $0.status == .success }.map { $0.originalPath })
                 var updatedGroups: [DuplicateGroup] = []
@@ -352,6 +415,69 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 self.activeTreemapRoot = self.treemapRoot
             }
         }
+    }
+
+    // MARK: - Controlled Diagnostic Benchmark Runner
+    public func runControlledBenchmark() async -> BenchmarkComparison {
+        let tempBase = FileManager.default.temporaryDirectory.appendingPathComponent("SquirrelBenchmark_\(UUID().uuidString)", isDirectory: true)
+        try? FileManager.default.createDirectory(at: tempBase, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.removeItem(at: tempBase)
+        }
+
+        // Generate 500 controlled files across 5 directories
+        var totalBytes: Int64 = 0
+        let payload = Data(repeating: 0x5A, count: 2048) // 2 KB
+        for d in 0..<5 {
+            let sub = tempBase.appendingPathComponent("Folder_\(d)", isDirectory: true)
+            try? FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
+            for f in 0..<100 {
+                let file = sub.appendingPathComponent("file_\(f).dat")
+                try? payload.write(to: file)
+                totalBytes += 2048
+            }
+        }
+
+        // Run cold scan
+        let coldScanner = FilesystemScanner()
+        let coldStart = Date()
+        let coldResult = await coldScanner.scan(roots: [tempBase])
+        let coldDuration = Date().timeIntervalSince(coldStart)
+
+        // Run warm scan
+        let warmScanner = FilesystemScanner()
+        let warmStart = Date()
+        let warmResult = await warmScanner.scan(roots: [tempBase])
+        let warmDuration = Date().timeIntervalSince(warmStart)
+
+        let safeCold = max(0.0001, coldDuration)
+        let safeWarm = max(0.0001, warmDuration)
+        let coldItemsPerSec = Double(coldResult.items.count) / safeCold
+        let warmItemsPerSec = Double(warmResult.items.count) / safeWarm
+        let speedup = safeCold / safeWarm
+
+        let footprint = SystemTelemetry.captureCurrentProcessTelemetry().physicalFootprint
+
+        let comparison = BenchmarkComparison(
+            testTarget: "Controlled Fixture (500 items, 5 subdirs)",
+            itemCount: coldResult.items.count,
+            totalBytes: totalBytes,
+            coldDurationSeconds: coldDuration,
+            warmDurationSeconds: warmDuration,
+            coldItemsPerSec: coldItemsPerSec,
+            warmItemsPerSec: warmItemsPerSec,
+            warmSpeedupFactor: speedup,
+            memoryFootprintBytes: footprint
+        )
+
+        BenchmarkManager.shared.setLastBenchmarkComparison(comparison)
+
+        await MainActor.run {
+            self.lastControlledBenchmark = comparison
+            self.refreshTelemetry()
+        }
+
+        return comparison
     }
 
     // MARK: - Treemap Navigation
