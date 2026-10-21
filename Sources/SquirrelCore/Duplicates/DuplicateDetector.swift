@@ -1,7 +1,7 @@
 import Foundation
 import CryptoKit
 
-/// Multi-stage content-based duplicate file detector.
+/// Multi-stage content-based duplicate file detector with full content confirmation.
 public actor DuplicateDetector {
     private var isCancelled = false
 
@@ -11,14 +11,14 @@ public actor DuplicateDetector {
         isCancelled = true
     }
 
-    /// Discovers exact duplicate files among given candidates.
+    /// Discovers exact duplicate files among given candidate items with full content confirmation.
     public func findDuplicates(
         items: [StorageItem],
         progressHandler: (@Sendable (String) -> Void)? = nil
     ) async -> [DuplicateGroup] {
         isCancelled = false
 
-        // Step 1: Filter regular, readable files with size > 0
+        // Step 1: Filter regular, readable files with size > 0 (exclude symlinks and directories)
         let eligible = items.filter { !$0.isDirectory && !$0.isSymbolicLink && $0.logicalSize > 0 && $0.isReadable }
 
         // Step 2: Group by exact logical size
@@ -29,11 +29,11 @@ public actor DuplicateDetector {
 
         // Keep only size clusters with at least 2 files
         let candidateClusters = sizeGroups.values.filter { $0.count > 1 }
-        progressHandler?("Found \(candidateClusters.count) candidate size clusters...")
+        progressHandler?("Analyzing \(candidateClusters.count) candidate size clusters...")
 
         var prefixGroups: [String: [StorageItem]] = [:]
 
-        // Step 3: Prefix hash (first 16 KB)
+        // Step 3: Prefix cryptographic hash (first 16 KB)
         for cluster in candidateClusters {
             if isCancelled || Task.isCancelled { break }
 
@@ -46,7 +46,7 @@ public actor DuplicateDetector {
         }
 
         let prefixClusters = prefixGroups.values.filter { $0.count > 1 }
-        progressHandler?("Analyzing \(prefixClusters.count) candidate prefix matches...")
+        progressHandler?("Computing full SHA-256 on \(prefixClusters.count) candidate collision clusters...")
 
         // Step 4: Full cryptographic SHA-256 hash
         var fullHashGroups: [String: [StorageItem]] = [:]
@@ -63,15 +63,30 @@ public actor DuplicateDetector {
             }
         }
 
-        // Step 5: Construct verified DuplicateGroup results
+        // Step 5: Final Content Verification (Byte-by-byte confirmation)
         var verifiedGroups: [DuplicateGroup] = []
 
         for (key, files) in fullHashGroups where files.count > 1 {
+            if isCancelled || Task.isCancelled { break }
+
             let hashOnly = key.components(separatedBy: "_").dropFirst().joined(separator: "_")
             let size = files.first?.logicalSize ?? 0
 
-            // Determine recommended keep: sort by modification date ascending (oldest is primary)
-            let sortedFiles = files.sorted { ($0.modificationDate ?? Date.distantPast) < ($1.modificationDate ?? Date.distantPast) }
+            // Verify full content equality between the primary file and other candidates
+            guard let primary = files.first else { continue }
+            var confirmedFiles: [StorageItem] = [primary]
+
+            for candidate in files.dropFirst() {
+                // Confirm 100% full content match
+                if FileManager.default.contentsEqual(atPath: primary.path, andPath: candidate.path) {
+                    confirmedFiles.append(candidate)
+                }
+            }
+
+            guard confirmedFiles.count > 1 else { continue }
+
+            // Determine recommended keep: sort by modification date ascending (oldest original is primary)
+            let sortedFiles = confirmedFiles.sorted { ($0.modificationDate ?? Date.distantPast) < ($1.modificationDate ?? Date.distantPast) }
 
             var members: [DuplicateMember] = []
             for (index, file) in sortedFiles.enumerated() {

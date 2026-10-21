@@ -193,10 +193,15 @@ public actor FilesystemScanner {
             .isWritableKey
         ]
 
+        var enumErrors: [InaccessibleLocation] = []
         let enumerator = FileManager.default.enumerator(
             at: url,
             includingPropertiesForKeys: Array(resourceKeys),
-            options: [.skipsPackageDescendants, .skipsHiddenFiles]
+            options: [.skipsPackageDescendants],
+            errorHandler: { errURL, err in
+                enumErrors.append(InaccessibleLocation(path: errURL.path, reason: err.localizedDescription))
+                return true
+            }
         )
 
         guard let fileEnumerator = enumerator else {
@@ -239,6 +244,10 @@ public actor FilesystemScanner {
                 var statBuf = stat()
                 let statResult = lstat(fileURL.path, &statBuf)
                 guard statResult == 0 else {
+                    // Disappearing file (ENOENT) during scan is safely skipped; other errors are recorded
+                    if errno != ENOENT {
+                        inaccessible.append(InaccessibleLocation(path: fileURL.path, reason: "lstat error: \(String(cString: strerror(errno)))"))
+                    }
                     continue
                 }
 
@@ -247,7 +256,8 @@ public actor FilesystemScanner {
                 scannedInodes.insert(inodeKey)
 
                 let logicalSize = Int64(resourceValues.fileSize ?? 0)
-                let allocatedSize = Int64(resourceValues.totalFileAllocatedSize ?? resourceValues.fileAllocatedSize ?? Int(logicalSize))
+                let posixAllocatedSize = Int64(statBuf.st_blocks) * 512
+                let allocatedSize = posixAllocatedSize > 0 ? posixAllocatedSize : Int64(resourceValues.totalFileAllocatedSize ?? resourceValues.fileAllocatedSize ?? Int(logicalSize))
 
                 // If hard link was already counted, do not inflate aggregate size
                 if !isHardLinkDuplicate && !isDirectory {
@@ -274,6 +284,10 @@ public actor FilesystemScanner {
             } catch {
                 inaccessible.append(InaccessibleLocation(path: fileURL.path, reason: error.localizedDescription))
             }
+        }
+
+        if !enumErrors.isEmpty {
+            inaccessible.append(contentsOf: enumErrors)
         }
     }
 

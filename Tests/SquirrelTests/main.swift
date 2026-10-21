@@ -4,6 +4,7 @@ import SquirrelCore
 var passedCount = 0
 var failedCount = 0
 
+@MainActor
 func assertTest(_ condition: Bool, _ message: String) {
     if condition {
         print("  ✓ PASS: \(message)")
@@ -14,7 +15,8 @@ func assertTest(_ condition: Bool, _ message: String) {
     }
 }
 
-func runAsyncTest(_ name: String, block: () async throws -> Void) async {
+@MainActor
+func runAsyncTest(_ name: String, block: @MainActor () async throws -> Void) async {
     print("\nRunning [\(name)]...")
     do {
         try await block()
@@ -276,6 +278,75 @@ await runAsyncTest("Squarified Treemap Layout Engine") {
         assertTest(child.rect.maxX <= canvasBounds.width + 1.0, "Tile fits within canvas width")
         assertTest(child.rect.maxY <= canvasBounds.height + 1.0, "Tile fits within canvas height")
     }
+}
+
+// Test 9: Hard-Link Inode Deduplication in Aggregate Accounting
+await runAsyncTest("Hard-Link Inode Deduplication") {
+    let hlDir = tempDir.appendingPathComponent("HardLinkTestDir", isDirectory: true)
+    try FileManager.default.createDirectory(at: hlDir, withIntermediateDirectories: true)
+
+    let originalFile = hlDir.appendingPathComponent("original.bin")
+    let hardlinkFile = hlDir.appendingPathComponent("link_to_original.bin")
+
+    let payload = Data(repeating: 0x7E, count: 8192) // 8192 bytes
+    try payload.write(to: originalFile)
+
+    // Create POSIX hard link (link original to hardlinkFile)
+    let linkResult = link(originalFile.path, hardlinkFile.path)
+    assertTest(linkResult == 0, "POSIX hard link created successfully between two directory entries")
+
+    let scanner = FilesystemScanner()
+    let result = await scanner.scan(roots: [hlDir])
+
+    assertTest(result.completedNormally, "Hard link directory scan completed normally")
+    assertTest(result.items.count == 2, "Scanner identified both directory entries (count = 2)")
+    assertTest(result.totalLogicalBytes == 8192, "Hard links pointing to identical (dev, ino) are deduplicated in aggregate totals (expected 8192 bytes, got \(result.totalLogicalBytes))")
+}
+
+// Test 10: Empty Directory Honest Accounting (Zero Fabrication)
+await runAsyncTest("Empty Directory Honest Accounting") {
+    let emptyDir = tempDir.appendingPathComponent("EmptyTestDir", isDirectory: true)
+    try FileManager.default.createDirectory(at: emptyDir, withIntermediateDirectories: true)
+
+    let scanner = FilesystemScanner()
+    let result = await scanner.scan(roots: [emptyDir])
+
+    assertTest(result.completedNormally, "Empty directory scan completed normally")
+    assertTest(result.items.isEmpty, "Empty directory yields 0 items (no mock items injected)")
+    assertTest(result.totalLogicalBytes == 0, "Empty directory yields exactly 0 logical bytes")
+    assertTest(result.totalAllocatedBytes == 0, "Empty directory yields exactly 0 allocated bytes")
+    assertTest(result.inaccessibleLocations.isEmpty, "No inaccessible locations in accessible empty dir")
+}
+
+// Test 11: User-Selected Custom Directory Traversal
+await runAsyncTest("User-Selected Custom Directory Traversal") {
+    let customDir = tempDir.appendingPathComponent("UserSelectedFolder", isDirectory: true)
+    try FileManager.default.createDirectory(at: customDir, withIntermediateDirectories: true)
+
+    let fileX = customDir.appendingPathComponent("custom_report.pdf")
+    let fileY = customDir.appendingPathComponent("custom_archive.pkg")
+
+    try "PDF content".data(using: .utf8)!.write(to: fileX)
+    try "PKG package".data(using: .utf8)!.write(to: fileY)
+
+    let scanner = FilesystemScanner()
+    let result = await scanner.scan(roots: [customDir])
+
+    assertTest(result.completedNormally, "Custom directory scan completed normally")
+    assertTest(result.items.count == 2, "Found exactly 2 items in custom folder")
+    assertTest(result.categoryTotals[.downloadsAndInstallers] ?? 0 > 0, "Installer file properly categorized")
+}
+
+// Test 12: Inaccessible Path Handling
+await runAsyncTest("Inaccessible & Non-Existent Path Handling") {
+    let nonExistentURL = URL(fileURLWithPath: "/non_existent_squirrel_path_\(UUID().uuidString)")
+
+    let scanner = FilesystemScanner()
+    let result = await scanner.scan(roots: [nonExistentURL])
+
+    assertTest(!result.inaccessibleLocations.isEmpty, "Inaccessible/non-existent location recorded")
+    assertTest(result.inaccessibleLocations.first?.path == nonExistentURL.path, "Recorded path matches attempted query path")
+    assertTest(result.totalLogicalBytes == 0, "No phantom bytes added for inaccessible paths")
 }
 
 print("\n==================================================")

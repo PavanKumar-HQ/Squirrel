@@ -54,6 +54,9 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     @Published public var scanProgress: ScanProgress = ScanProgress()
     @Published public var lastScanDate: Date? = nil
 
+    @Published public var scanTargetDescription: String = "Standard Folders (Downloads, Caches, Logs)"
+    @Published public var customScanRootURL: URL? = nil
+
     // Findings and Data
     @Published public var scannedItems: [StorageItem] = []
     @Published public var findings: [Finding] = []
@@ -89,8 +92,12 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         refreshHistory()
     }
 
-    public func refreshVolumeMetrics() {
-        self.volumeSpace = VolumeSpace.querySystemVolume()
+    public func refreshVolumeMetrics(for url: URL? = nil) {
+        if let targetURL = url {
+            self.volumeSpace = VolumeSpace.queryVolume(at: targetURL)
+        } else {
+            self.volumeSpace = VolumeSpace.querySystemVolume()
+        }
     }
 
     public func refreshHistory() {
@@ -104,7 +111,23 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     // MARK: - Safe Scan Execution
-    public func startScan() {
+    @MainActor
+    public func selectCustomFolderAndScan() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.prompt = "Scan Folder"
+        panel.message = "Choose a real directory or volume on this Mac to scan with Squirrel"
+        if panel.runModal() == .OK, let selectedURL = panel.url {
+            self.customScanRootURL = selectedURL
+            self.scanTargetDescription = selectedURL.path
+            self.refreshVolumeMetrics(for: selectedURL)
+            self.startScan(customRoots: [selectedURL], targetDescription: selectedURL.path)
+        }
+    }
+
+    public func startScan(customRoots: [URL]? = nil, targetDescription: String? = nil) {
         guard scanStatus != .scanning else { return }
         scanStatus = .scanning
         scanProgress = ScanProgress(currentPath: "Initializing scan roots...", itemsScannedCount: 0, bytesScannedTotal: 0, currentCategory: "Setup")
@@ -113,19 +136,29 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         selectedFindingIds.removeAll()
         selectedDuplicatePaths.removeAll()
 
-        Task {
-            let fileManager = FileManager.default
-            let home = fileManager.homeDirectoryForCurrentUser
+        let fileManager = FileManager.default
+        let home = fileManager.homeDirectoryForCurrentUser
 
-            var scanRoots: [URL] = [
+        let roots: [URL]
+        let description: String
+        if let custom = customRoots, !custom.isEmpty {
+            roots = custom
+            description = targetDescription ?? custom.first?.path ?? "Custom Selection"
+        } else {
+            roots = [
                 home.appendingPathComponent("Downloads", isDirectory: true),
                 home.appendingPathComponent("Library/Caches", isDirectory: true),
                 home.appendingPathComponent("Library/Logs", isDirectory: true)
             ]
+            description = "Standard Folders (Downloads, Caches, Logs)"
+        }
 
-            scanRoots = scanRoots.filter { fileManager.fileExists(atPath: $0.path) && fileManager.isReadableFile(atPath: $0.path) }
+        self.scanTargetDescription = description
 
-            let result = await scanner.scan(roots: scanRoots) { progress in
+        Task {
+            let validRoots = roots.filter { fileManager.fileExists(atPath: $0.path) && fileManager.isReadableFile(atPath: $0.path) }
+
+            let result = await scanner.scan(roots: validRoots) { progress in
                 Task { @MainActor in
                     self.scanProgress = progress
                 }

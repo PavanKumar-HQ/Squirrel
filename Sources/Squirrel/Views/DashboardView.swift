@@ -45,10 +45,14 @@ public struct DashboardView: View {
                 // 1. Storage Capacity Card
                 VolumeCapacityCard(
                     volume: appState.volumeSpace,
+                    scanTargetDescription: appState.scanTargetDescription,
                     lastScanDate: appState.lastScanDate,
                     scanStatus: appState.scanStatus,
-                    onScan: {
+                    onScanStandard: {
                         appState.startScan()
+                    },
+                    onSelectFolder: {
+                        appState.selectCustomFolderAndScan()
                     },
                     onCancel: {
                         appState.cancelScan()
@@ -168,29 +172,54 @@ public struct DashboardView: View {
 // MARK: - Subcomponents
 struct VolumeCapacityCard: View {
     let volume: VolumeSpace
+    let scanTargetDescription: String
     let lastScanDate: Date?
     let scanStatus: ScanStatus
-    let onScan: () -> Void
+    let onScanStandard: () -> Void
+    let onSelectFolder: () -> Void
     let onCancel: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .center) {
+            HStack(alignment: .top) {
                 Image(systemName: "internaldrive.fill")
-                    .font(.system(size: 28))
+                    .font(.system(size: 32))
                     .foregroundColor(.accentColor)
+                    .padding(.top, 2)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(volume.volumeName)
-                        .font(.title3.weight(.bold))
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 8) {
+                        Text(volume.volumeName)
+                            .font(.title3.weight(.bold))
+                        Text("(\(volume.mountPoint))")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+                    }
+
                     HStack(spacing: 6) {
+                        Text("Source: \(volume.measurementSource)")
+                            .font(.caption)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.12))
+                            .cornerRadius(4)
+
                         Text("Status: \(scanStatus.rawValue)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
                         if let date = lastScanDate {
                             Text("• Last Scan: \(date.formatted(date: .abbreviated, time: .shortened))")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
                         }
                     }
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+
+                    Text("Target: \(scanTargetDescription)")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
 
                 Spacer()
@@ -204,43 +233,74 @@ struct VolumeCapacityCard: View {
                     }
                     .buttonStyle(.bordered)
                 } else {
-                    Button(action: onScan) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.triangle.2.circlepath")
-                            Text("Scan Disk")
+                    HStack(spacing: 8) {
+                        Button(action: onSelectFolder) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "folder.badge.gearshape")
+                                Text("Choose Folder...")
+                            }
                         }
+                        .buttonStyle(.bordered)
+                        .controlSize(.regular)
+
+                        Button(action: onScanStandard) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                Text("Scan Standard")
+                            }
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.regular)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.regular)
                 }
             }
 
-            let fractionUsed = volume.totalCapacity > 0 ? Double(volume.usedSpace) / Double(volume.totalCapacity) : 0.0
-
-            VStack(alignment: .leading, spacing: 6) {
-                GeometryReader { geo in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.secondary.opacity(0.18))
-                            .frame(height: 12)
-
-                        Capsule()
-                            .fill(LinearGradient(colors: [Color.blue, Color.purple], startPoint: .leading, endPoint: .trailing))
-                            .frame(width: max(8, geo.size.width * CGFloat(fractionUsed)), height: 12)
-                    }
-                }
-                .frame(height: 12)
-
+            if volume.totalCapacity == 0 {
                 HStack {
-                    Text("Used: \(ByteCountFormatter.string(fromByteCount: volume.usedSpace, countStyle: .file)) (\(Int(fractionUsed * 100))%)")
+                    Image(systemName: "exclamationmark.triangle")
+                        .foregroundColor(.orange)
+                    Text("Volume storage capacity is currently unavailable from macOS filesystem APIs.")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                }
+                .padding(8)
+                .background(Color.orange.opacity(0.1))
+                .cornerRadius(6)
+            } else {
+                let fractionUsed = Double(volume.usedSpace) / Double(volume.totalCapacity)
 
-                    Spacer()
+                VStack(alignment: .leading, spacing: 6) {
+                    GeometryReader { geo in
+                        ZStack(alignment: .leading) {
+                            Capsule()
+                                .fill(Color.secondary.opacity(0.18))
+                                .frame(height: 12)
 
-                    Text("Available: \(ByteCountFormatter.string(fromByteCount: volume.availableCapacity, countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: volume.totalCapacity, countStyle: .file))")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                            Capsule()
+                                .fill(LinearGradient(colors: [Color.blue, Color.purple], startPoint: .leading, endPoint: .trailing))
+                                .frame(width: max(8, geo.size.width * CGFloat(fractionUsed)), height: 12)
+                        }
+                    }
+                    .frame(height: 12)
+
+                    HStack {
+                        Text("Used: \(ByteCountFormatter.string(fromByteCount: volume.usedSpace, countStyle: .file)) (\(Int(fractionUsed * 100))%)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Spacer()
+
+                        Text("Available: \(ByteCountFormatter.string(fromByteCount: volume.availableCapacity, countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: volume.totalCapacity, countStyle: .file))")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    if volume.opportunisticAvailableCapacity > volume.availableCapacity {
+                        let purgeable = volume.opportunisticAvailableCapacity - volume.availableCapacity
+                        Text("Purgeable by macOS APFS under storage pressure: \(ByteCountFormatter.string(fromByteCount: purgeable, countStyle: .file))")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
         }
