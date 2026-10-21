@@ -485,6 +485,222 @@ await runAsyncTest("Apple Storage Parity & APFS Container Audit") {
     assertTest(catNames.contains("macOS"), "Category 'macOS' is measured")
 }
 
+// Test 17: Darwin Mach Kernel Process Telemetry
+await runAsyncTest("Darwin Mach Kernel Process Telemetry") {
+    let telemetry = SystemTelemetry.captureCurrentProcessTelemetry()
+    assertTest(telemetry.physicalFootprint > 0, "Physical footprint is positive from Darwin kernel: \(telemetry.physicalFootprint / 1024 / 1024) MB")
+    assertTest(telemetry.residentSize > 0, "Resident size (RSS) is positive: \(telemetry.residentSize / 1024 / 1024) MB")
+    assertTest(telemetry.userCPUTimeMicroseconds + telemetry.systemCPUTimeMicroseconds > 0, "Cumulative Mach thread CPU execution time is captured")
+}
+
+// Test 18: TOCTOU Revalidation & Symlink Mutation Defense
+await runAsyncTest("TOCTOU Immediate Revalidation Before Removal") {
+    let toctouTarget = tempDir.appendingPathComponent("toctou_target.txt")
+    try "Original legitimate file".write(to: toctouTarget, atomically: true, encoding: .utf8)
+
+    // Pre-flight validation passes initially
+    let initialValidation = SafetyValidator.validate(path: toctouTarget.path)
+    if case .passed = initialValidation {
+        assertTest(true, "Initial file passed safety validation")
+    } else {
+        assertTest(false, "Initial file should pass validation")
+    }
+
+    // Now mutate: delete file and replace with symlink to /etc/hosts
+    try FileManager.default.removeItem(at: toctouTarget)
+    try FileManager.default.createSymbolicLink(at: toctouTarget, withDestinationURL: URL(fileURLWithPath: "/etc/hosts"))
+
+    // Revalidate immediately before destructive action
+    let revalidation = SafetyValidator.validate(path: toctouTarget.path)
+    if case .failed(let reason) = revalidation {
+        assertTest(reason.contains("symbolic link"), "TOCTOU attack detected and prevented: \(reason)")
+    } else {
+        assertTest(false, "SafetyValidator failed to detect symlink substitution!")
+    }
+}
+
+// Test 19: Cache Cleanup 5-Metric Accounting & Candidate Breakdown Verification
+await runAsyncTest("Cache Cleanup 5-Metric Storage Recovery & Candidate Accounting") {
+    let fixtureDir = tempDir.appendingPathComponent("CleanupFixture_\(UUID().uuidString)", isDirectory: true)
+    try FileManager.default.createDirectory(at: fixtureDir, withIntermediateDirectories: true)
+
+    // Create 3 files in fixture:
+    // File 1: Old cache file (16 KB) -> Safe to clean
+    let oldCacheFile = fixtureDir.appendingPathComponent("old_cache.dat")
+    let data16k = Data(repeating: 0x43, count: 16384)
+    try data16k.write(to: oldCacheFile)
+
+    // File 2: Hard-link copy of File 1 -> Safe to clean, but hard link deduplicated
+    let hardLinkFile = fixtureDir.appendingPathComponent("hardlink_cache.dat")
+    try FileManager.default.linkItem(at: oldCacheFile, to: hardLinkFile)
+
+    // File 3: Inactive log file (8 KB) -> Safe to clean
+    let logFile = fixtureDir.appendingPathComponent("app.log")
+    let data8k = Data(repeating: 0x4C, count: 8192)
+    try data8k.write(to: logFile)
+
+    // Scan the fixture
+    let scanner = FilesystemScanner()
+    let scanResult = await scanner.scan(roots: [fixtureDir])
+    assertTest(scanResult.items.count == 3, "Discovered exactly 3 candidate files in fixture")
+
+    // Construct findings manually for this test fixture
+    let oldFinding = Finding(
+        category: .userCaches,
+        title: "Old Cache",
+        path: oldCacheFile.path,
+        logicalSize: 16384,
+        allocatedSize: 16384,
+        ruleId: "RULE-CACHE-01",
+        ruleDescription: "Test cache",
+        evidence: ["Test fixture"],
+        eligibility: .safeToClean,
+        riskLevel: .low,
+        recoveryMethod: .directRemoval,
+        estimatedReclaimableBytes: 16384
+    )
+    let hardLinkFinding = Finding(
+        category: .userCaches,
+        title: "Hardlink Cache",
+        path: hardLinkFile.path,
+        logicalSize: 16384,
+        allocatedSize: 16384,
+        ruleId: "RULE-CACHE-01",
+        ruleDescription: "Test hardlink",
+        evidence: ["Test fixture"],
+        eligibility: .safeToClean,
+        riskLevel: .low,
+        recoveryMethod: .directRemoval,
+        estimatedReclaimableBytes: 16384
+    )
+    let logFinding = Finding(
+        category: .systemLogs,
+        title: "Old Log",
+        path: logFile.path,
+        logicalSize: 8192,
+        allocatedSize: 8192,
+        ruleId: "RULE-LOGS-01",
+        ruleDescription: "Test log",
+        evidence: ["Test fixture"],
+        eligibility: .safeToClean,
+        riskLevel: .low,
+        recoveryMethod: .directRemoval,
+        estimatedReclaimableBytes: 8192
+    )
+    let reviewOnlyFinding = Finding(
+        category: .largeFiles,
+        title: "Review Installer",
+        path: "/mock/review_only.dmg",
+        logicalSize: 50 * 1024 * 1024,
+        allocatedSize: 50 * 1024 * 1024,
+        ruleId: "RULE-INSTALLER-01",
+        ruleDescription: "Review item",
+        evidence: ["Must be skipped"],
+        eligibility: .reviewRecommended,
+        riskLevel: .medium,
+        recoveryMethod: .macOSTrash,
+        estimatedReclaimableBytes: 50 * 1024 * 1024
+    )
+
+    let allDiscovered = [oldFinding, hardLinkFinding, logFinding, reviewOnlyFinding]
+
+    let engine = CleanupEngine()
+    let summary = await engine.executeSafeBatch(
+        findings: allDiscovered,
+        scanDuration: 0.12,
+        targetVolumeURL: tempDir
+    )
+
+    // Verify candidate breakdown
+    assertTest(summary.candidatesDiscoveredCount == 4, "Candidate discovered count matches input (4)")
+    assertTest(summary.itemsEligibleCount == 3, "Items eligible count reflects Safe to Clean only (3)")
+    assertTest(summary.itemsSkippedCount == 1, "Review only item safely skipped (1)")
+    assertTest(summary.itemsSucceededCount == 3, "All 3 eligible items processed successfully")
+    assertTest(summary.itemsFailedCount == 0, "Zero failures reported")
+
+    // Verify 5 storage metrics
+    // Metric 1: Logical bytes identified (16384 + 8192 = 24576, hard link deduplicated)
+    assertTest(summary.logicalBytesIdentified == 24576, "Metric 1 (Logical Bytes Identified) deduplicated hard links: \(summary.logicalBytesIdentified) == 24576")
+    // Metric 2: Estimated reclaimable storage
+    assertTest(summary.estimatedReclaimableBytes == 24576, "Metric 2 (Estimated Reclaimable Storage) matches deduplicated blocks: \(summary.estimatedReclaimableBytes)")
+    // Metric 3: Bytes successfully processed (both files removed from disk)
+    assertTest(summary.bytesSuccessfullyProcessed == 40960, "Metric 3 (Bytes Successfully Processed) captures all handled paths: \(summary.bytesSuccessfullyProcessed)")
+    // Metric 4: Observed filesystem capacity delta
+    assertTest(summary.beforeCapacity.totalCapacity > 0, "Before-cleanup volume capacity is measured")
+    assertTest(summary.afterCapacity.totalCapacity > 0, "After-cleanup volume capacity is measured")
+    // Metric 5: Verified reclaimed storage
+    assertTest(summary.verifiedReclaimedBytes >= 0, "Metric 5 (Verified Reclaimed Storage) derived from OS capacity delta")
+
+    // Verify files on disk
+    assertTest(!FileManager.default.fileExists(atPath: oldCacheFile.path), "Eligible cache file was cleanly removed")
+    assertTest(!FileManager.default.fileExists(atPath: logFile.path), "Eligible log file was cleanly removed")
+}
+
+// Test 20: Cooperative Cancellation Responsiveness
+await runAsyncTest("Cooperative Cancellation Responsiveness") {
+    let largeDir = tempDir.appendingPathComponent("CancelFixture", isDirectory: true)
+    try FileManager.default.createDirectory(at: largeDir, withIntermediateDirectories: true)
+    for i in 0..<100 {
+        let f = largeDir.appendingPathComponent("item_\(i).txt")
+        try "test".write(to: f, atomically: true, encoding: .utf8)
+    }
+
+    let cancelScanner = FilesystemScanner()
+    let scanTask = Task {
+        return await cancelScanner.scan(roots: [largeDir]) { _ in
+            Thread.sleep(forTimeInterval: 0.002)
+        }
+    }
+
+    // Cancel while progress is streaming
+    try await Task.sleep(nanoseconds: 5_000_000)
+    scanTask.cancel()
+    await cancelScanner.cancel()
+    let cancelResult = await scanTask.value
+
+    assertTest(!cancelResult.completedNormally, "Scan safely reported non-normal completion upon cooperative cancellation")
+}
+
+// Test 21: Efficiency Benchmarking Across Workloads (Small, Deep, Many Files, Cold vs Warm)
+await runAsyncTest("Efficiency Benchmarking Across Workloads & Warm Cache Speedup") {
+    // Workload A: Small directory tree (100 files)
+    let smallDir = tempDir.appendingPathComponent("WorkloadA_Small", isDirectory: true)
+    try FileManager.default.createDirectory(at: smallDir, withIntermediateDirectories: true)
+    for i in 0..<100 {
+        try "small".write(to: smallDir.appendingPathComponent("f_\(i).txt"), atomically: true, encoding: .utf8)
+    }
+
+    let benchScanner = FilesystemScanner()
+    let coldStartA = Date()
+    let resColdA = await benchScanner.scan(roots: [smallDir])
+    let coldDurA = Date().timeIntervalSince(coldStartA)
+
+    assertTest(resColdA.items.count == 100, "Workload A (Small) found all 100 files")
+    assertTest(coldDurA > 0, "Workload A scan duration is positive (\(String(format: "%.3f", coldDurA))s)")
+    let throughputA = Double(resColdA.items.count) / max(0.0001, coldDurA)
+    assertTest(throughputA > 0, "Workload A throughput is positive: \(String(format: "%.0f", throughputA)) items/s")
+
+    // Workload B: Deep directory tree (5 levels deep)
+    var currentSub = tempDir.appendingPathComponent("WorkloadB_Deep", isDirectory: true)
+    for depth in 0..<5 {
+        currentSub = currentSub.appendingPathComponent("Level_\(depth)", isDirectory: true)
+        try FileManager.default.createDirectory(at: currentSub, withIntermediateDirectories: true)
+        for i in 0..<20 {
+            try "deep".write(to: currentSub.appendingPathComponent("deep_\(i).txt"), atomically: true, encoding: .utf8)
+        }
+    }
+    let resDeep = await benchScanner.scan(roots: [tempDir.appendingPathComponent("WorkloadB_Deep")])
+    assertTest(resDeep.items.count == 105, "Workload B (Deep) traversed all 5 directory levels (100 files + 5 folders = 105)")
+
+    // Workload C: Controlled 500-file Cold vs Warm Benchmark
+    let comparison = await BenchmarkManager.shared.runControlledBenchmark()
+    assertTest(comparison.itemCount >= 500, "Controlled benchmark evaluated \(comparison.itemCount) items")
+    assertTest(comparison.coldDurationSeconds > 0, "Cold traversal duration is positive (\(String(format: "%.3f", comparison.coldDurationSeconds))s)")
+    assertTest(comparison.warmDurationSeconds > 0, "Warm traversal duration is positive (\(String(format: "%.3f", comparison.warmDurationSeconds))s)")
+    assertTest(comparison.warmSpeedupFactor > 0, "Warm speedup factor is calculated: \(String(format: "%.2f", comparison.warmSpeedupFactor))x")
+    assertTest(comparison.memoryFootprintBytes > 0, "Process memory footprint during benchmark is verified via Mach kernel: \(comparison.memoryFootprintBytes / 1024 / 1024) MB")
+}
+
 print("\n==================================================")
 print("  Test Results: \(passedCount) Passed, \(failedCount) Failed")
 print("==================================================")
@@ -494,3 +710,4 @@ if failedCount > 0 {
 } else {
     exit(0)
 }
+

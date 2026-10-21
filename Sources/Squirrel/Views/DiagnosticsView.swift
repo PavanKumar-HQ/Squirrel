@@ -311,7 +311,7 @@ public struct DiagnosticsView: View {
                         Button {
                             runBenchmark()
                         } label: {
-                            if isRunningBenchmark {
+                            if appState.isRunningBenchmark {
                                 ProgressView()
                                     .controlSize(.small)
                             } else {
@@ -320,11 +320,11 @@ public struct DiagnosticsView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .controlSize(.small)
-                        .disabled(isRunningBenchmark || appState.scanStatus == .scanning)
+                        .disabled(appState.isRunningBenchmark || appState.scanStatus == .scanning)
                     }
 
-                    if isRunningBenchmark {
-                        Text(benchmarkStatusText)
+                    if appState.isRunningBenchmark {
+                        Text(appState.benchmarkStatusText)
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
@@ -356,7 +356,7 @@ public struct DiagnosticsView: View {
                                 systemImage: "folder"
                             )
                         }
-                    } else if !isRunningBenchmark {
+                    } else if !appState.isRunningBenchmark {
                         Text("Click 'Run Efficiency Benchmark' to generate an isolated 500-file directory tree fixture and measure live cold vs warm scan throughput.")
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
@@ -510,14 +510,14 @@ public struct DiagnosticsView: View {
     }
 
     private func runBenchmark() {
-        isRunningBenchmark = true
-        benchmarkStatusText = "Preparing isolated directory fixture with 500 files..."
+        appState.isRunningBenchmark = true
+        appState.benchmarkStatusText = "Preparing isolated directory fixture with 500 files..."
 
         Task {
-            let comparison = await appState.runControlledBenchmark()
+            _ = await appState.runControlledBenchmark()
             await MainActor.run {
-                self.isRunningBenchmark = false
-                self.benchmarkStatusText = ""
+                appState.isRunningBenchmark = false
+                appState.benchmarkStatusText = ""
             }
         }
     }

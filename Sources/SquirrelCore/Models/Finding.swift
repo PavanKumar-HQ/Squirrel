@@ -47,7 +47,7 @@ public struct Finding: Identifiable, Codable, Sendable, Equatable {
         path: String,
         logicalSize: Int64,
         allocatedSize: Int64,
-        modificationDate: Date?,
+        modificationDate: Date? = nil,
         ruleId: String,
         ruleDescription: String,
         evidence: [String],
@@ -55,7 +55,7 @@ public struct Finding: Identifiable, Codable, Sendable, Equatable {
         riskLevel: RiskLevel,
         recoveryMethod: RecoveryMethod,
         estimatedReclaimableBytes: Int64,
-        consequencesExplanation: String,
+        consequencesExplanation: String = "Safe removal",
         exclusionReason: String? = nil
     ) {
         self.id = id

@@ -419,64 +419,11 @@ public final class AppState: ObservableObject, @unchecked Sendable {
 
     // MARK: - Controlled Diagnostic Benchmark Runner
     public func runControlledBenchmark() async -> BenchmarkComparison {
-        let tempBase = FileManager.default.temporaryDirectory.appendingPathComponent("SquirrelBenchmark_\(UUID().uuidString)", isDirectory: true)
-        try? FileManager.default.createDirectory(at: tempBase, withIntermediateDirectories: true)
-        defer {
-            try? FileManager.default.removeItem(at: tempBase)
-        }
-
-        // Generate 500 controlled files across 5 directories
-        var totalBytes: Int64 = 0
-        let payload = Data(repeating: 0x5A, count: 2048) // 2 KB
-        for d in 0..<5 {
-            let sub = tempBase.appendingPathComponent("Folder_\(d)", isDirectory: true)
-            try? FileManager.default.createDirectory(at: sub, withIntermediateDirectories: true)
-            for f in 0..<100 {
-                let file = sub.appendingPathComponent("file_\(f).dat")
-                try? payload.write(to: file)
-                totalBytes += 2048
-            }
-        }
-
-        // Run cold scan
-        let coldScanner = FilesystemScanner()
-        let coldStart = Date()
-        let coldResult = await coldScanner.scan(roots: [tempBase])
-        let coldDuration = Date().timeIntervalSince(coldStart)
-
-        // Run warm scan
-        let warmScanner = FilesystemScanner()
-        let warmStart = Date()
-        let warmResult = await warmScanner.scan(roots: [tempBase])
-        let warmDuration = Date().timeIntervalSince(warmStart)
-
-        let safeCold = max(0.0001, coldDuration)
-        let safeWarm = max(0.0001, warmDuration)
-        let coldItemsPerSec = Double(coldResult.items.count) / safeCold
-        let warmItemsPerSec = Double(warmResult.items.count) / safeWarm
-        let speedup = safeCold / safeWarm
-
-        let footprint = SystemTelemetry.captureCurrentProcessTelemetry().physicalFootprint
-
-        let comparison = BenchmarkComparison(
-            testTarget: "Controlled Fixture (500 items, 5 subdirs)",
-            itemCount: coldResult.items.count,
-            totalBytes: totalBytes,
-            coldDurationSeconds: coldDuration,
-            warmDurationSeconds: warmDuration,
-            coldItemsPerSec: coldItemsPerSec,
-            warmItemsPerSec: warmItemsPerSec,
-            warmSpeedupFactor: speedup,
-            memoryFootprintBytes: footprint
-        )
-
-        BenchmarkManager.shared.setLastBenchmarkComparison(comparison)
-
+        let comparison = await BenchmarkManager.shared.runControlledBenchmark()
         await MainActor.run {
             self.lastControlledBenchmark = comparison
             self.refreshTelemetry()
         }
-
         return comparison
     }
 
