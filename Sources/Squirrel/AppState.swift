@@ -109,6 +109,12 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         } else {
             self.volumeSpace = VolumeSpace.querySystemVolume()
         }
+        Task.detached(priority: .utility) {
+            let audit = await AppleStorageAuditor.auditSystemStorage()
+            await MainActor.run {
+                self.volumeSpace.auditReport = audit
+            }
+        }
     }
 
     public func refreshHistory() {

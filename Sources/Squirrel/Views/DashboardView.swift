@@ -237,69 +237,17 @@ struct VolumeCapacityCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            HStack(alignment: .top) {
-                Image(systemName: "internaldrive.fill")
-                    .font(.system(size: 32))
-                    .foregroundColor(.accentColor)
-                    .padding(.top, 2)
-
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 8) {
-                        Text(volume.volumeName)
-                            .font(.title3.weight(.bold))
-                        Text("(\(volume.mountPoint))")
-                            .font(.subheadline)
-                            .foregroundColor(.secondary)
-                    }
-
-                    HStack(spacing: 6) {
-                        Text("Source: \(volume.measurementSource)")
-                            .font(.caption2.weight(.medium))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.12))
-                            .cornerRadius(4)
-
-                        Text("Status: \(scanStatus.rawValue)")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-
-                        if let date = lastScanDate {
-                            Text("• Last Scan: \(date.formatted(date: .abbreviated, time: .shortened))")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-                    }
-                }
+            // Header matching macOS System Settings > General > Storage
+            HStack(alignment: .firstTextBaseline) {
+                Text(volume.volumeName)
+                    .font(.system(size: 16, weight: .bold))
 
                 Spacer()
 
-                if scanStatus == .scanning {
-                    Button(role: .destructive, action: onCancel) {
-                        HStack(spacing: 5) {
-                            Image(systemName: "xmark.circle.fill")
-                            Text("Stop Scan")
-                        }
-                    }
-                    .buttonStyle(.bordered)
-                } else {
-                    HStack(spacing: 8) {
-                        Button(action: onSelectFolder) {
-                            HStack(spacing: 5) {
-                                Image(systemName: "folder.badge.gearshape")
-                                Text("Choose Folder...")
-                            }
-                        }
-                        .buttonStyle(.bordered)
-
-                        Button(action: onScanStandard) {
-                            HStack(spacing: 5) {
-                                Image(systemName: "arrow.triangle.2.circlepath")
-                                Text("Scan Standard")
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
-                    }
+                if volume.totalCapacity > 0 {
+                    Text("\(ByteCountFormatter.string(fromByteCount: volume.usedSpace, countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: volume.totalCapacity, countStyle: .file)) used")
+                        .font(.system(size: 13, weight: .regular))
+                        .foregroundColor(.secondary)
                 }
             }
 
@@ -315,48 +263,135 @@ struct VolumeCapacityCard: View {
                 .background(Color.orange.opacity(0.1))
                 .cornerRadius(8)
             } else {
-                let fractionUsed = Double(volume.usedSpace) / Double(volume.totalCapacity)
+                let total = Double(max(1, volume.totalCapacity))
+                let availableStr = ByteCountFormatter.string(fromByteCount: volume.availableCapacity, countStyle: .file)
 
-                VStack(alignment: .leading, spacing: 8) {
-                    GeometryReader { geo in
-                        ZStack(alignment: .leading) {
-                            Capsule()
-                                .fill(Color.secondary.opacity(0.16))
-                                .frame(height: 12)
+                // Segmented Storage Bar matching Apple System Settings
+                GeometryReader { geo in
+                    let width = geo.size.width
 
-                            Capsule()
+                    ZStack(alignment: .leading) {
+                        // Empty/Available Track (Dark Gray)
+                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            .fill(Color.secondary.opacity(0.18))
+                            .frame(height: 18)
+
+                        // Categorized segments
+                        if let categories = volume.auditReport?.categories, !categories.isEmpty {
+                            HStack(spacing: 0.8) {
+                                ForEach(categories) { cat in
+                                    let segWidth = max(2.0, CGFloat(Double(cat.measuredBytes) / total * Double(width)))
+                                    RoundedRectangle(cornerRadius: 2, style: .continuous)
+                                        .fill(Color(hex: cat.colorHex) ?? Color.gray)
+                                        .frame(width: segWidth, height: 18)
+                                }
+                            }
+                        } else {
+                            let fractionUsed = Double(volume.usedSpace) / total
+                            RoundedRectangle(cornerRadius: 6, style: .continuous)
                                 .fill(Color.accentColor)
-                                .frame(width: max(8, geo.size.width * CGFloat(fractionUsed)), height: 12)
+                                .frame(width: max(4, CGFloat(fractionUsed * Double(width))), height: 18)
+                        }
+
+                        // Centered Available Storage Label inside track
+                        HStack {
+                            Spacer()
+                            Text(availableStr)
+                                .font(.system(size: 11, weight: .bold).monospacedDigit())
+                                .foregroundColor(.primary.opacity(0.85))
+                                .shadow(color: Color.black.opacity(0.4), radius: 1, x: 0, y: 1)
+                                .padding(.trailing, 14)
                         }
                     }
-                    .frame(height: 12)
+                }
+                .frame(height: 18)
 
-                    HStack {
-                        HStack(spacing: 6) {
-                            Circle().fill(Color.accentColor).frame(width: 8, height: 8)
-                            Text("Used: \(ByteCountFormatter.string(fromByteCount: volume.usedSpace, countStyle: .file)) (\(Int(fractionUsed * 100))%)")
-                                .font(.caption.monospacedDigit())
+                // Native Apple Legend Row
+                HStack(spacing: 14) {
+                    if let categories = volume.auditReport?.categories, !categories.isEmpty {
+                        ForEach(categories) { cat in
+                            HStack(spacing: 4) {
+                                Circle()
+                                    .fill(Color(hex: cat.colorHex) ?? Color.gray)
+                                    .frame(width: 7, height: 7)
+                                Text(cat.categoryName)
+                                    .font(.system(size: 11, weight: .medium))
+                            }
+                            .help("\(cat.categoryName): \(ByteCountFormatter.string(fromByteCount: cat.measuredBytes, countStyle: .file))\n\(cat.observationNotes)")
                         }
-
-                        Spacer()
-
-                        HStack(spacing: 6) {
-                            Circle().fill(Color.secondary.opacity(0.5)).frame(width: 8, height: 8)
-                            Text("Available: \(ByteCountFormatter.string(fromByteCount: volume.availableCapacity, countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: volume.totalCapacity, countStyle: .file))")
-                                .font(.caption.monospacedDigit())
-                                .foregroundColor(.secondary)
-                        }
-                    }
-
-                    if volume.opportunisticAvailableCapacity > volume.availableCapacity {
-                        let purgeable = volume.opportunisticAvailableCapacity - volume.availableCapacity
+                    } else {
                         HStack(spacing: 4) {
-                            Image(systemName: "info.circle")
-                                .font(.caption2)
-                            Text("Purgeable by macOS APFS under storage pressure: \(ByteCountFormatter.string(fromByteCount: purgeable, countStyle: .file))")
-                                .font(.caption2)
+                            Circle().fill(Color.accentColor).frame(width: 7, height: 7)
+                            Text("Used").font(.system(size: 11))
                         }
-                        .foregroundColor(.secondary)
+                        HStack(spacing: 4) {
+                            Circle().fill(Color.secondary.opacity(0.4)).frame(width: 7, height: 7)
+                            Text("Available").font(.system(size: 11)).foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .padding(.top, 2)
+
+                Divider()
+                    .padding(.vertical, 2)
+
+                // Actions and APFS Metadata row
+                HStack(alignment: .center) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        if volume.purgeableSpace > 0 {
+                            HStack(spacing: 4) {
+                                Image(systemName: "info.circle")
+                                    .font(.caption2)
+                                Text("Purgeable by APFS: \(ByteCountFormatter.string(fromByteCount: volume.purgeableSpace, countStyle: .file)) • Container allocation: \(ByteCountFormatter.string(fromByteCount: volume.rawPhysicalUsedSpace, countStyle: .file))")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+
+                        HStack(spacing: 6) {
+                            Text("Source: Foundation URLResourceValues (APFS)")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+
+                            if let date = lastScanDate {
+                                Text("• Last Scan: \(date.formatted(date: .abbreviated, time: .shortened))")
+                                    .font(.caption2)
+                                    .foregroundColor(.secondary)
+                            }
+                        }
+                    }
+
+                    Spacer()
+
+                    if scanStatus == .scanning {
+                        Button(role: .destructive, action: onCancel) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "xmark.circle.fill")
+                                Text("Stop Scan")
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    } else {
+                        HStack(spacing: 8) {
+                            Button(action: onSelectFolder) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "folder.badge.gearshape")
+                                    Text("Choose Folder...")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+
+                            Button(action: onScanStandard) {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "arrow.triangle.2.circlepath")
+                                    Text("Scan Standard")
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
                     }
                 }
             }

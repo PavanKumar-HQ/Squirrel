@@ -463,6 +463,28 @@ await runAsyncTest("Scanner Progress Pacing & Throttle Check") {
     assertTest(counter.count <= 20, "Progress handler was properly throttled (called \(counter.count) times for 100 fast files)")
 }
 
+// Test 16: Apple Storage Parity & APFS Container Audit
+await runAsyncTest("Apple Storage Parity & APFS Container Audit") {
+    let report = await AppleStorageAuditor.auditSystemStorage()
+
+    assertTest(report.totalContainerCapacity > 0, "Total APFS container capacity is positive (\(Double(report.totalContainerCapacity) / 1e9) GB)")
+    assertTest(report.appleAvailableStorage > 0, "Apple System Settings available storage is positive (\(Double(report.appleAvailableStorage) / 1e9) GB)")
+    assertTest(report.appleUsedStorage > 0, "Apple System Settings used storage is positive (\(Double(report.appleUsedStorage) / 1e9) GB)")
+    assertTest(
+        report.totalContainerCapacity == report.appleAvailableStorage + report.appleUsedStorage,
+        "Total container equals Apple available plus Apple used (\(report.totalContainerCapacity) == \(report.appleAvailableStorage + report.appleUsedStorage))"
+    )
+    assertTest(report.rawPhysicalAvailableStorage <= report.appleAvailableStorage, "Raw unallocated physical storage <= Apple available storage (accounts for APFS purgeable)")
+    assertTest(report.categories.count >= 5, "Audit includes all 5 primary Apple storage categories")
+
+    let catNames = Set(report.categories.map { $0.categoryName })
+    assertTest(catNames.contains("Documents"), "Category 'Documents' is measured")
+    assertTest(catNames.contains("Applications"), "Category 'Applications' is measured")
+    assertTest(catNames.contains("Developer"), "Category 'Developer' is measured")
+    assertTest(catNames.contains("System Data"), "Category 'System Data' is measured")
+    assertTest(catNames.contains("macOS"), "Category 'macOS' is measured")
+}
+
 print("\n==================================================")
 print("  Test Results: \(passedCount) Passed, \(failedCount) Failed")
 print("==================================================")
