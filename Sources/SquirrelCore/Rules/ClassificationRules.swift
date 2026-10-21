@@ -7,9 +7,30 @@ public struct ClassificationRules {
     public init() {}
 
     /// Classifies an individual discovered item into a traceable Finding.
-    public func classify(item: StorageItem) -> Finding? {
+    public func classify(item: StorageItem, inaccessiblePaths: Set<String> = []) -> Finding? {
         let pathLower = item.path.lowercased()
         let nameLower = item.name.lowercased()
+
+        // Rule 0: TCC / System / Inaccessible / Non-writable protection
+        if !item.isWritable || isPathProtectedOrInaccessible(item.path, inaccessiblePaths: inaccessiblePaths) {
+            return Finding(
+                category: determineCategory(for: item),
+                title: "Protected Item (\(item.name))",
+                path: item.path,
+                logicalSize: item.logicalSize,
+                allocatedSize: item.allocatedSize,
+                modificationDate: item.modificationDate,
+                ruleId: "RULE-TCC-RESTRICTED",
+                ruleDescription: "This location is protected by macOS System Integrity Protection (SIP) or TCC privacy controls and cannot be modified without elevated permissions.",
+                evidence: ["System permissions prevent modification", "Protected by macOS security policy"],
+                eligibility: .keep,
+                riskLevel: .high,
+                recoveryMethod: .macOSTrash,
+                estimatedReclaimableBytes: 0,
+                consequencesExplanation: "Cannot be modified safely; excluded from cleanup.",
+                exclusionReason: "macOS TCC/SIP permission restricted"
+            )
+        }
 
         // Rule: Developer artifacts - explicitly excluded from first-release cleanup
         if isDeveloperArtifact(path: pathLower) {
@@ -148,5 +169,29 @@ public struct ClassificationRules {
         guard let date = date else { return false }
         let cutoff = Calendar.current.date(byAdding: .day, value: -days, to: Date()) ?? Date()
         return date < cutoff
+    }
+
+    private func isPathProtectedOrInaccessible(_ path: String, inaccessiblePaths: Set<String>) -> Bool {
+        if inaccessiblePaths.contains(path) { return true }
+        for inacc in inaccessiblePaths {
+            let prefix = inacc.hasSuffix("/") ? inacc : "\(inacc)/"
+            if path.hasPrefix(prefix) { return true }
+        }
+        return false
+    }
+
+    private func determineCategory(for item: StorageItem) -> StorageCategory {
+        let path = item.path.lowercased()
+        if path.contains("/caches/") || path.hasSuffix("/caches") {
+            return .userCaches
+        } else if path.contains("/logs/") || path.hasSuffix(".log") || path.hasSuffix(".diag") || path.hasSuffix(".crash") {
+            return .systemLogs
+        } else if path.hasSuffix(".dmg") || path.hasSuffix(".pkg") || path.hasSuffix(".iso") || path.contains("/downloads/") {
+            return .downloadsAndInstallers
+        } else if item.logicalSize >= 100 * 1024 * 1024 {
+            return .largeFiles
+        } else {
+            return .otherUserData
+        }
     }
 }

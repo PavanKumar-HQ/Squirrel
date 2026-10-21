@@ -167,8 +167,9 @@ public final class AppState: ObservableObject, @unchecked Sendable {
             // Classify findings
             var computedFindings: [Finding] = []
             let rules = ClassificationRules.shared
+            let inaccessiblePaths = Set(result.inaccessibleLocations.map { $0.path })
             for item in result.items {
-                if let finding = rules.classify(item: item) {
+                if let finding = rules.classify(item: item, inaccessiblePaths: inaccessiblePaths) {
                     computedFindings.append(finding)
                 }
             }
@@ -198,6 +199,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 self.inaccessibleLocations = result.inaccessibleLocations
                 self.treemapRoot = rootTreemap
                 self.activeTreemapRoot = rootTreemap
+                self.selectedTreemapNode = rootTreemap.children.first
                 self.scanStatus = result.completedNormally ? .completed : .cancelled
                 self.lastScanDate = Date()
                 self.refreshVolumeMetrics()

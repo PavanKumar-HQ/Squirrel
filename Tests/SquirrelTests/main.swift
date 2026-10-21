@@ -349,6 +349,84 @@ await runAsyncTest("Inaccessible & Non-Existent Path Handling") {
     assertTest(result.totalLogicalBytes == 0, "No phantom bytes added for inaccessible paths")
 }
 
+// Test 13: Protected TCC / Inaccessible Path Exclusion
+await runAsyncTest("Protected TCC & Inaccessible Classification Protection") {
+    let protectedPath = "/Users/test/Library/Caches/FamilyCircle"
+    let protectedItem = StorageItem(
+        url: URL(fileURLWithPath: protectedPath),
+        path: protectedPath,
+        name: "FamilyCircle",
+        logicalSize: 1048576,
+        allocatedSize: 1048576,
+        isDirectory: true,
+        isSymbolicLink: false,
+        deviceId: 1,
+        inode: 123456,
+        modificationDate: Date().addingTimeInterval(-86400 * 30),
+        isReadable: false,
+        isWritable: false
+    )
+
+    let rules = ClassificationRules.shared
+    let inaccessiblePaths: Set<String> = [protectedPath]
+    let finding = rules.classify(item: protectedItem, inaccessiblePaths: inaccessiblePaths)
+
+    assertTest(finding != nil, "Finding produced for protected item")
+    assertTest(finding?.eligibility == .keep, "Protected item is classified as Keep / Excluded")
+    assertTest(finding?.ruleId == "RULE-TCC-RESTRICTED", "RULE-TCC-RESTRICTED applied to protected item")
+    assertTest(finding?.estimatedReclaimableBytes == 0, "Reclaimable bytes is 0 for protected item")
+}
+
+// Test 14: Hierarchical Cascading Deletion & Parent Pruning
+await runAsyncTest("Hierarchical Container Cascading Deletion") {
+    let containerDir = tempDir.appendingPathComponent("CascadeTest_\(UUID().uuidString)", isDirectory: true)
+    let childSubdir = containerDir.appendingPathComponent("NestedSubdir", isDirectory: true)
+    let childFile = childSubdir.appendingPathComponent("leaf.log")
+
+    try FileManager.default.createDirectory(at: childSubdir, withIntermediateDirectories: true)
+    try "cascade payload".data(using: .utf8)!.write(to: childFile)
+
+    let parentFinding = Finding(
+        category: .systemLogs,
+        title: "Parent Container",
+        path: containerDir.path,
+        logicalSize: 2048,
+        allocatedSize: 4096,
+        modificationDate: Date(),
+        ruleId: "RULE-LOGS-01",
+        ruleDescription: "Parent container test",
+        evidence: [],
+        eligibility: .safeToClean,
+        riskLevel: .low,
+        recoveryMethod: .macOSTrash,
+        estimatedReclaimableBytes: 4096,
+        consequencesExplanation: "Testing parent container deletion"
+    )
+
+    let childFinding = Finding(
+        category: .systemLogs,
+        title: "Child Log",
+        path: childFile.path,
+        logicalSize: 1024,
+        allocatedSize: 4096,
+        modificationDate: Date(),
+        ruleId: "RULE-LOGS-01",
+        ruleDescription: "Child leaf test",
+        evidence: [],
+        eligibility: .safeToClean,
+        riskLevel: .low,
+        recoveryMethod: .macOSTrash,
+        estimatedReclaimableBytes: 4096,
+        consequencesExplanation: "Testing child file deletion"
+    )
+
+    let engine = CleanupEngine()
+    let summary = await engine.executeSelected(findings: [parentFinding, childFinding])
+
+    assertTest(summary.itemsSucceededCount == 2, "Both parent and child marked succeeded (child counted with parent)")
+    assertTest(summary.itemsFailedCount == 0, "Zero failures (no errno: 2 on child leaf)")
+}
+
 print("\n==================================================")
 print("  Test Results: \(passedCount) Passed, \(failedCount) Failed")
 print("==================================================")

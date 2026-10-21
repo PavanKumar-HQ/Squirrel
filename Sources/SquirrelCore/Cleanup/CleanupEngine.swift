@@ -93,9 +93,11 @@ public actor CleanupEngine {
         var bytesReclaimed: Int64 = 0
         var failedDict: [String: String] = [:]
 
-        let total = members.count
+        var cleanedAncestorPaths = Set<String>()
+        let sortedMembers = members.sorted { $0.path.count < $1.path.count }
+        let total = sortedMembers.count
 
-        for (idx, member) in members.enumerated() {
+        for (idx, member) in sortedMembers.enumerated() {
             if isCancelled || Task.isCancelled { break }
 
             progressHandler?(CleanupProgress(
@@ -106,27 +108,54 @@ public actor CleanupEngine {
                 isComplete: false
             ))
 
-            // Revalidate
-            let validation = SafetyValidator.validate(path: member.path)
-            switch validation {
-            case .failed(let reason):
-                failed += 1
-                failedDict[member.path] = reason
+            // Check if this duplicate was already removed along with an ancestor directory
+            if isDescendantOfAny(path: member.path, ancestors: cleanedAncestorPaths) {
+                succeeded += 1
                 journalManager.record(JournalEntry(
                     originalPath: member.path,
                     sanitizedName: member.fileName,
                     actionType: .movedToTrash,
-                    status: .failed,
+                    status: .success,
                     bytesReclaimed: 0,
-                    recoveryMethod: .macOSTrash,
-                    errorMessage: reason
+                    recoveryMethod: .macOSTrash
                 ))
+                continue
+            }
+
+            // Revalidate
+            let validation = SafetyValidator.validate(path: member.path)
+            switch validation {
+            case .failed(let reason):
+                if isDescendantOfAny(path: member.path, ancestors: cleanedAncestorPaths) {
+                    succeeded += 1
+                    journalManager.record(JournalEntry(
+                        originalPath: member.path,
+                        sanitizedName: member.fileName,
+                        actionType: .movedToTrash,
+                        status: .success,
+                        bytesReclaimed: 0,
+                        recoveryMethod: .macOSTrash
+                    ))
+                } else {
+                    failed += 1
+                    failedDict[member.path] = reason
+                    journalManager.record(JournalEntry(
+                        originalPath: member.path,
+                        sanitizedName: member.fileName,
+                        actionType: .movedToTrash,
+                        status: .failed,
+                        bytesReclaimed: 0,
+                        recoveryMethod: .macOSTrash,
+                        errorMessage: reason
+                    ))
+                }
             case .passed:
                 do {
                     var resultingURL: NSURL?
                     try FileManager.default.trashItem(at: URL(fileURLWithPath: member.path), resultingItemURL: &resultingURL)
                     succeeded += 1
                     bytesReclaimed += member.allocatedSize
+                    cleanedAncestorPaths.insert(member.path)
                     journalManager.record(JournalEntry(
                         originalPath: member.path,
                         sanitizedName: member.fileName,
@@ -178,9 +207,13 @@ public actor CleanupEngine {
         var bytesReclaimed: Int64 = 0
         var failedDict: [String: String] = [:]
 
-        let total = findings.count
+        // Sort by path length ascending so parent folders are processed before nested child contents
+        let sorted = findings.sorted { $0.path.count < $1.path.count }
+        var cleanedAncestorPaths = Set<String>()
 
-        for (idx, finding) in findings.enumerated() {
+        let total = sorted.count
+
+        for (idx, finding) in sorted.enumerated() {
             if isCancelled || Task.isCancelled { break }
 
             let url = URL(fileURLWithPath: finding.path)
@@ -192,21 +225,48 @@ public actor CleanupEngine {
                 isComplete: false
             ))
 
+            // Check if this item's container was already trashed/cleaned in this batch
+            if isDescendantOfAny(path: finding.path, ancestors: cleanedAncestorPaths) {
+                succeeded += 1
+                journalManager.record(JournalEntry(
+                    originalPath: finding.path,
+                    sanitizedName: url.lastPathComponent,
+                    actionType: actionTypeFor(method: finding.recoveryMethod),
+                    status: .success,
+                    bytesReclaimed: 0,
+                    recoveryMethod: finding.recoveryMethod
+                ))
+                continue
+            }
+
             // Step 1: Pre-flight Safety Validation
             let validation = SafetyValidator.validate(path: finding.path)
             guard case .passed = validation else {
                 if case .failed(let reason) = validation {
-                    failed += 1
-                    failedDict[finding.path] = reason
-                    journalManager.record(JournalEntry(
-                        originalPath: finding.path,
-                        sanitizedName: url.lastPathComponent,
-                        actionType: actionTypeFor(method: finding.recoveryMethod),
-                        status: .failed,
-                        bytesReclaimed: 0,
-                        recoveryMethod: finding.recoveryMethod,
-                        errorMessage: reason
-                    ))
+                    // If the item is missing because its parent was moved in this batch, count as succeeded
+                    if isDescendantOfAny(path: finding.path, ancestors: cleanedAncestorPaths) {
+                        succeeded += 1
+                        journalManager.record(JournalEntry(
+                            originalPath: finding.path,
+                            sanitizedName: url.lastPathComponent,
+                            actionType: actionTypeFor(method: finding.recoveryMethod),
+                            status: .success,
+                            bytesReclaimed: 0,
+                            recoveryMethod: finding.recoveryMethod
+                        ))
+                    } else {
+                        failed += 1
+                        failedDict[finding.path] = reason
+                        journalManager.record(JournalEntry(
+                            originalPath: finding.path,
+                            sanitizedName: url.lastPathComponent,
+                            actionType: actionTypeFor(method: finding.recoveryMethod),
+                            status: .failed,
+                            bytesReclaimed: 0,
+                            recoveryMethod: finding.recoveryMethod,
+                            errorMessage: reason
+                        ))
+                    }
                 }
                 continue
             }
@@ -219,6 +279,7 @@ public actor CleanupEngine {
                     try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
                     succeeded += 1
                     bytesReclaimed += finding.allocatedSize
+                    cleanedAncestorPaths.insert(finding.path)
                     journalManager.record(JournalEntry(
                         originalPath: finding.path,
                         sanitizedName: url.lastPathComponent,
@@ -232,6 +293,7 @@ public actor CleanupEngine {
                     let record = try await quarantineManager.quarantineFile(at: finding.path)
                     succeeded += 1
                     bytesReclaimed += finding.allocatedSize
+                    cleanedAncestorPaths.insert(finding.path)
                     journalManager.record(JournalEntry(
                         originalPath: finding.path,
                         sanitizedName: url.lastPathComponent,
@@ -246,6 +308,7 @@ public actor CleanupEngine {
                     try FileManager.default.removeItem(at: url)
                     succeeded += 1
                     bytesReclaimed += finding.allocatedSize
+                    cleanedAncestorPaths.insert(finding.path)
                     journalManager.record(JournalEntry(
                         originalPath: finding.path,
                         sanitizedName: url.lastPathComponent,
@@ -285,6 +348,16 @@ public actor CleanupEngine {
             totalBytesReclaimed: bytesReclaimed,
             failedItems: failedDict
         )
+    }
+
+    private func isDescendantOfAny(path: String, ancestors: Set<String>) -> Bool {
+        for ancestor in ancestors {
+            let prefix = ancestor.hasSuffix("/") ? ancestor : "\(ancestor)/"
+            if path.hasPrefix(prefix) {
+                return true
+            }
+        }
+        return false
     }
 
     private func actionTypeFor(method: RecoveryMethod) -> JournalActionType {
