@@ -409,6 +409,33 @@ public actor CleanupEngine {
         targetVolumeURL: URL,
         progressHandler: (@Sendable (CleanupProgress) -> Void)?
     ) async -> CleanupSummary {
+        if Task.isCancelled {
+            isCancelled = true
+        }
+        guard !isCancelled else {
+            let beforeCapacity = VolumeSpace.queryVolume(at: targetVolumeURL)
+            return CleanupSummary(
+                candidatesDiscoveredCount: candidatesDiscoveredCount,
+                itemsEligibleCount: eligibleFindings.count,
+                itemsSkippedCount: itemsSkippedCount,
+                itemsSucceededCount: 0,
+                itemsFailedCount: 0,
+                logicalBytesIdentified: 0,
+                estimatedReclaimableBytes: 0,
+                bytesSuccessfullyProcessed: 0,
+                observedCapacityDelta: 0,
+                verifiedReclaimedBytes: 0,
+                beforeCapacity: beforeCapacity,
+                afterCapacity: beforeCapacity,
+                observedRawPhysicalDelta: 0,
+                confidenceLevel: .unverified,
+                knownLimitations: ["Operation was cancelled before execution began."],
+                scanDurationSeconds: scanDuration,
+                cleanupDurationSeconds: 0,
+                failedItems: [:],
+                recoveryMethodsUsed: [:]
+            )
+        }
         isCancelled = false
         let cleanupStartTime = Date()
         let beforeCapacity = VolumeSpace.queryVolume(at: targetVolumeURL)

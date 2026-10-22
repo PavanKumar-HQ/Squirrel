@@ -16,6 +16,7 @@ public enum NavigationSection: String, CaseIterable, Identifiable {
     case treemap = "Storage Treemap"
     case duplicates = "Exact Duplicates"
     case history = "History & Quarantine"
+    case folderAccess = "Folder Access"
     case permissions = "Inaccessible Areas"
     case diagnostics = "Diagnostics & Efficiency"
 
@@ -28,6 +29,7 @@ public enum NavigationSection: String, CaseIterable, Identifiable {
         case .treemap: return "square.grid.3x3"
         case .duplicates: return "doc.on.doc"
         case .history: return "clock.arrow.circlepath"
+        case .folderAccess: return "folder.badge.gearshape"
         case .permissions: return "lock.shield"
         case .diagnostics: return "speedometer"
         }
@@ -94,6 +96,9 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     @Published public var journalEntries: [JournalEntry] = []
     @Published public var quarantineRecords: [QuarantineRecord] = []
 
+    // Folder Access & Bookmarks
+    @Published public var authorizedFolders: [AuthorizedFolderRecord] = []
+
     // Diagnostics & Efficiency Telemetry
     @Published public var lastScanPerformance: ScanPerformanceRecord? = nil
     @Published public var recentBenchmarkRecords: [ScanPerformanceRecord] = []
@@ -113,6 +118,36 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         refreshVolumeMetrics()
         refreshHistory()
         refreshTelemetry()
+        refreshFolderAccess()
+    }
+
+    public func refreshFolderAccess() {
+        FolderAccessManager.shared.refreshAllStatuses()
+        self.authorizedFolders = FolderAccessManager.shared.getRecords()
+    }
+
+    public func authorizeFolder(url: URL) throws {
+        try FolderAccessManager.shared.grantAccess(for: url)
+        self.refreshFolderAccess()
+    }
+
+    public func revokeFolderAccess(id: UUID) {
+        FolderAccessManager.shared.revokeAccess(id: id)
+        self.refreshFolderAccess()
+    }
+
+    @MainActor
+    public func scanAuthorizedFolder(record: AuthorizedFolderRecord) {
+        do {
+            let (resolvedURL, _) = try FolderAccessManager.shared.resolveAccess(for: record)
+            self.customScanRootURL = resolvedURL
+            self.scanTargetDescription = record.displayName
+            self.refreshVolumeMetrics(for: resolvedURL)
+            self.refreshFolderAccess()
+            self.startScan(customRoots: [resolvedURL], targetDescription: record.displayName)
+        } catch {
+            self.refreshFolderAccess()
+        }
     }
 
     public func refreshVolumeMetrics(for url: URL? = nil) {
@@ -152,14 +187,29 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
-        panel.prompt = "Scan Folder"
-        panel.message = "Choose a real directory or volume on this Mac to scan with Squirrel"
+        panel.showsHiddenFiles = true
+        panel.directoryURL = FileManager.default.homeDirectoryForCurrentUser
+        panel.prompt = "Authorize & Scan"
+        panel.message = "Choose a directory on this Mac to authorize and scan with Squirrel. Squirrel saves this authorization securely so you are never prompted again."
         if panel.runModal() == .OK, let selectedURL = panel.url {
+            // Persist authorization grant
+            try? self.authorizeFolder(url: selectedURL)
             self.customScanRootURL = selectedURL
             self.scanTargetDescription = selectedURL.path
             self.refreshVolumeMetrics(for: selectedURL)
             self.startScan(customRoots: [selectedURL], targetDescription: selectedURL.path)
         }
+    }
+
+    @MainActor
+    public func scanHomeDirectory() {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        // Persist authorization grant for home
+        try? self.authorizeFolder(url: home)
+        self.customScanRootURL = home
+        self.scanTargetDescription = "User Home (~/)"
+        self.refreshVolumeMetrics(for: home)
+        self.startScan(customRoots: [home], targetDescription: "User Home (~/)")
     }
 
     public func startScan(customRoots: [URL]? = nil, targetDescription: String? = nil) {
@@ -194,9 +244,21 @@ public final class AppState: ObservableObject, @unchecked Sendable {
             let startFootprint = SystemTelemetry.captureCurrentProcessTelemetry().physicalFootprint
             let validRoots = roots.filter { fileManager.fileExists(atPath: $0.path) && fileManager.isReadableFile(atPath: $0.path) }
 
-            let result = await scanner.scan(roots: validRoots) { progress in
-                Task { @MainActor in
-                    self.scanProgress = progress
+            // Execute scan wrapped in security-scoped resource access scopes
+            let result: ScanResult
+            if let accessResult = try? await FolderAccessManager.shared.withAccess(to: validRoots, operation: { accessibleRoots in
+                return await self.scanner.scan(roots: accessibleRoots) { progress in
+                    Task { @MainActor in
+                        self.scanProgress = progress
+                    }
+                }
+            }) {
+                result = accessResult
+            } else {
+                result = await self.scanner.scan(roots: validRoots) { progress in
+                    Task { @MainActor in
+                        self.scanProgress = progress
+                    }
                 }
             }
 

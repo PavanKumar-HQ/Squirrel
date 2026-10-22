@@ -133,6 +133,8 @@ public struct SquirrelApp: App {
                         DuplicatesView(appState: appState)
                     case .history:
                         HistoryView(appState: appState)
+                    case .folderAccess:
+                        FolderAccessView(appState: appState)
                     case .permissions:
                         InaccessibleLocationsView(appState: appState)
                     case .diagnostics:
@@ -150,8 +152,30 @@ public struct SquirrelApp: App {
                         }
                     } else {
                         LiquidGlassContainer(spacing: 6) {
-                            LiquidGlassButton("Choose Folder...", icon: "folder.badge.gearshape") {
+                            if !appState.authorizedFolders.isEmpty {
+                                Menu {
+                                    ForEach(appState.authorizedFolders) { folder in
+                                        Button(action: {
+                                            appState.scanAuthorizedFolder(record: folder)
+                                        }) {
+                                            Label(folder.displayName, systemImage: folder.status.iconName)
+                                        }
+                                    }
+                                    Divider()
+                                    Button(action: {
+                                        appState.selectedSection = .folderAccess
+                                    }) {
+                                        Label("Manage Authorized Folders...", systemImage: "gearshape")
+                                    }
+                                } label: {
+                                    Label("Authorized Folders", systemImage: "folder.badge.checkmark")
+                                }
+                            }
+                            LiquidGlassButton("Authorize Folder...", icon: "folder.badge.plus") {
                                 appState.selectCustomFolderAndScan()
+                            }
+                            LiquidGlassButton("Scan Home (~/)", icon: "house") {
+                                appState.scanHomeDirectory()
                             }
                             LiquidGlassButton("Scan Standard", icon: "arrow.triangle.2.circlepath", isProminent: true) {
                                 appState.startScan()
@@ -188,6 +212,8 @@ public struct SquirrelApp: App {
             return appState.findings.isEmpty ? nil : appState.findings.count
         case .duplicates:
             return appState.duplicateGroups.isEmpty ? nil : appState.duplicateGroups.count
+        case .folderAccess:
+            return appState.authorizedFolders.isEmpty ? nil : appState.authorizedFolders.count
         case .permissions:
             return appState.inaccessibleLocations.isEmpty ? nil : appState.inaccessibleLocations.count
         case .history:

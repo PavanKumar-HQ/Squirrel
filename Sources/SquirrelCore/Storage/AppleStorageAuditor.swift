@@ -198,7 +198,7 @@ public struct AppleStorageAuditor {
                 measuredBytes: documentsBytes,
                 colorHex: "#F24852", // Apple Red
                 measurementMethod: "Filesystem scan of ~/Documents, ~/Downloads, ~/Desktop, media, and user projects",
-                observationNotes: "Represents user files, workspaces, archives, and downloaded packages."
+                observationNotes: "Apple classifies all non-app workspaces in your home folder (~/attendly, ~/Downloads, repositories, archives) as 'Documents' — even if ~/Documents is completely empty."
             ),
             AppleCategoryMeasurement(
                 categoryName: "Applications",

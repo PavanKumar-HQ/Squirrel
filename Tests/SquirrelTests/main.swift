@@ -234,6 +234,63 @@ await runAsyncTest("Classification Safety Rules") {
     )
     let installerFinding = rules.classify(item: installerItem)
     assertTest(installerFinding?.eligibility == .reviewRecommended, "Installer requires explicit Review Recommended")
+
+    // Project disposable build cache (.next) rule
+    let nextItem = StorageItem(
+        url: URL(fileURLWithPath: "/Users/developer/attendly/.next"),
+        path: "/Users/developer/attendly/.next",
+        name: ".next",
+        logicalSize: 16 * 1024 * 1024 * 1024,
+        allocatedSize: 16 * 1024 * 1024 * 1024,
+        isDirectory: true,
+        isSymbolicLink: false,
+        deviceId: 1,
+        inode: 504,
+        modificationDate: Date(),
+        isReadable: true,
+        isWritable: true
+    )
+    let nextFinding = rules.classify(item: nextItem)
+    assertTest(nextFinding?.ruleId == "RULE-BUILD-CACHE", "Correct rule ID applied for .next: RULE-BUILD-CACHE")
+    assertTest(nextFinding?.eligibility == .reviewRecommended, "Disposable build cache classified as Review Recommended")
+    assertTest(nextFinding?.recoveryMethod == .macOSTrash, "Recovery method is safely macOS Trash")
+    assertTest(nextFinding?.riskLevel == .low, "Risk level is Low Risk because Next.js regenerates it automatically")
+
+    // User source code preservation check: src/App.tsx must NEVER be classified as cleanable
+    let sourceFile = StorageItem(
+        url: URL(fileURLWithPath: "/Users/developer/attendly/src/App.tsx"),
+        path: "/Users/developer/attendly/src/App.tsx",
+        name: "App.tsx",
+        logicalSize: 4096,
+        allocatedSize: 4096,
+        isDirectory: false,
+        isSymbolicLink: false,
+        deviceId: 1,
+        inode: 505,
+        modificationDate: Date(),
+        isReadable: true,
+        isWritable: true
+    )
+    let sourceFinding = rules.classify(item: sourceFile)
+    assertTest(sourceFinding == nil, "User source code (src/App.tsx) is completely excluded from cleanup (finding is nil)")
+
+    // User personal document preservation check: Document.pdf must NEVER be classified as cleanable
+    let docFile = StorageItem(
+        url: URL(fileURLWithPath: "/Users/developer/Documents/Resume.pdf"),
+        path: "/Users/developer/Documents/Resume.pdf",
+        name: "Resume.pdf",
+        logicalSize: 500 * 1024,
+        allocatedSize: 500 * 1024,
+        isDirectory: false,
+        isSymbolicLink: false,
+        deviceId: 1,
+        inode: 506,
+        modificationDate: Date(),
+        isReadable: true,
+        isWritable: true
+    )
+    let docFinding = rules.classify(item: docFile)
+    assertTest(docFinding == nil, "User personal document (Resume.pdf) is completely excluded from cleanup")
 }
 
 // Test 8: Squarified Treemap Layout Engine
@@ -696,6 +753,66 @@ await runAsyncTest("Efficiency Benchmarking Across Workloads & Warm Cache Speedu
     assertTest(comparison.warmDurationSeconds > 0, "Warm traversal duration is positive (\(String(format: "%.3f", comparison.warmDurationSeconds))s)")
     assertTest(comparison.warmSpeedupFactor > 0, "Warm speedup factor is calculated: \(String(format: "%.2f", comparison.warmSpeedupFactor))x")
     assertTest(comparison.memoryFootprintBytes > 0, "Process memory footprint during benchmark is verified via Mach kernel: \(comparison.memoryFootprintBytes / 1024 / 1024) MB")
+}
+
+// Test 22: FolderAccessManager & Security-Scoped Bookmark Persistence Lifecycle
+await runAsyncTest("FolderAccessManager & Persistent Bookmark Lifecycle") {
+    let customManifest = tempDir.appendingPathComponent("test_authorized_folders.json")
+    let folderA = tempDir.appendingPathComponent("AuthorizedProjectA", isDirectory: true)
+    let folderB = tempDir.appendingPathComponent("UnauthorizedProjectB", isDirectory: true)
+    let folderC = tempDir.appendingPathComponent("MovedFolderC", isDirectory: true)
+    try FileManager.default.createDirectory(at: folderA, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: folderB, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: folderC, withIntermediateDirectories: true)
+
+    let manager = FolderAccessManager(customManifestURL: customManifest)
+
+    // 1. Grant access to folderA
+    let recordA = try manager.grantAccess(for: folderA)
+    assertTest(recordA.status == .valid, "Granted folder A record status is valid")
+    assertTest(manager.hasValidAuthorization(for: folderA), "Manager confirms valid authorization for Folder A")
+    assertTest(!recordA.bookmarkData.isEmpty, "Bookmark data was generated and stored")
+
+    // 2. Unrelated folder is NOT authorized
+    assertTest(!manager.hasValidAuthorization(for: folderB), "Grant for Folder A does NOT grant access to unrelated Folder B")
+
+    // 3. Simulating App Relaunch (fresh instance reads from persisted manifest)
+    let launchedManager = FolderAccessManager(customManifestURL: customManifest)
+    let records = launchedManager.getRecords()
+    assertTest(records.count == 1, "Relaunched manager successfully restored 1 persisted record from disk")
+    assertTest(launchedManager.hasValidAuthorization(for: folderA), "Relaunched manager confirms valid authorization without prompt")
+
+    // 4. Resolve access and balanced scope
+    let (resolvedURL, scope) = try launchedManager.resolveAccess(for: records[0])
+    assertTest(resolvedURL.resolvingSymlinksInPath().path == folderA.resolvingSymlinksInPath().path, "Resolved URL path matches original authorized path")
+    scope.stop() // Idempotent stop
+    scope.stop()
+
+    // 5. withAccess execution wrapper
+    var executedInScope = false
+    try await launchedManager.withAccess(to: records[0]) { accessibleURL in
+        assertTest(FileManager.default.fileExists(atPath: accessibleURL.path), "Accessible URL is readable inside scope")
+        executedInScope = true
+    }
+    assertTest(executedInScope, "withAccess executed block successfully and balanced scope upon exit")
+
+    // 6. Multiple roots access wrapper
+    let multiResult = try await launchedManager.withAccess(to: [folderA, folderB]) { urls in
+        assertTest(urls.count == 2, "withAccess prepared both requested URLs")
+        return true
+    }
+    assertTest(multiResult, "withAccess across multiple roots completed normally")
+
+    // 7. Moved/Deleted Folder Handling
+    _ = try launchedManager.grantAccess(for: folderC)
+    try FileManager.default.removeItem(at: folderC) // simulate delete/move
+    launchedManager.refreshAllStatuses()
+    let recordC = launchedManager.findRecord(for: folderC)
+    assertTest(recordC?.status == .notFound, "Deleted/moved folder correctly marked as .notFound status")
+
+    // 8. Revocation
+    launchedManager.revokeAccess(id: recordA.id)
+    assertTest(!launchedManager.hasValidAuthorization(for: folderA), "Revoking access immediately disqualifies folder from automatic scan")
 }
 
 print("\n==================================================")

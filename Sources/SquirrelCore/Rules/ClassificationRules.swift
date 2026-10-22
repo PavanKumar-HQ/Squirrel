@@ -32,6 +32,29 @@ public struct ClassificationRules {
             )
         }
 
+        // Rule: Disposable Project Build Caches (e.g., .next, .turbo, .npm/_cacache, .cache)
+        if isDisposableBuildCache(path: pathLower, name: nameLower) {
+            return Finding(
+                category: .userCaches,
+                title: "Project Build Cache (\(item.name))",
+                path: item.path,
+                logicalSize: item.logicalSize,
+                allocatedSize: item.allocatedSize,
+                modificationDate: item.modificationDate,
+                ruleId: "RULE-BUILD-CACHE",
+                ruleDescription: "Compiler and bundler intermediate build artifacts (e.g., Next.js, Turborepo, npm cache).",
+                evidence: [
+                    "Identified disposable build cache: \(item.name)",
+                    "User source files, configurations, and git repositories are completely outside this directory"
+                ],
+                eligibility: .reviewRecommended,
+                riskLevel: .low,
+                recoveryMethod: .macOSTrash,
+                estimatedReclaimableBytes: item.allocatedSize,
+                consequencesExplanation: "Only compiled bytecode, sourcemaps, and server bundles are moved to macOS Trash. User source code (src/, app/, pages/, package.json, .env, .git) is completely untouched. Your framework regenerates this folder automatically upon next run."
+            )
+        }
+
         // Rule: Developer artifacts - explicitly excluded from first-release cleanup
         if isDeveloperArtifact(path: pathLower) {
             return Finding(
@@ -152,6 +175,14 @@ public struct ClassificationRules {
         }
 
         return nil
+    }
+
+    private func isDisposableBuildCache(path: String, name: String) -> Bool {
+        if name == ".next" || path.contains("/.next/") || path.hasSuffix("/.next") { return true }
+        if name == ".turbo" || path.contains("/.turbo/") || path.hasSuffix("/.turbo") { return true }
+        if path.contains("/.npm/_cacache/") || path.hasSuffix("/.npm/_cacache") { return true }
+        if path.contains("/.cache/") || path.hasSuffix("/.cache") { return true }
+        return false
     }
 
     private func isDeveloperArtifact(path: String) -> Bool {
