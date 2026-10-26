@@ -237,9 +237,12 @@ public final class AppState: ObservableObject, @unchecked Sendable {
             roots = [
                 home.appendingPathComponent("Downloads", isDirectory: true),
                 home.appendingPathComponent("Library/Caches", isDirectory: true),
-                home.appendingPathComponent("Library/Logs", isDirectory: true)
+                home.appendingPathComponent("Library/Logs", isDirectory: true),
+                home.appendingPathComponent(".npm", isDirectory: true),
+                home.appendingPathComponent(".cache", isDirectory: true),
+                home.appendingPathComponent(".Trash", isDirectory: true)
             ]
-            description = "Standard Folders (Downloads, Caches, Logs)"
+            description = "Standard Folders (Downloads, Caches, Logs, Tools, Trash)"
         }
 
         self.scanTargetDescription = description

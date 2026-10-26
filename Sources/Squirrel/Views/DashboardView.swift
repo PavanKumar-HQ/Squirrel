@@ -85,6 +85,10 @@ public struct DashboardView: View {
                         duplicateBytes: appState.duplicatePotentialReclaimBytes,
                         onCleanSafely: {
                             appState.showCleanSafelyConfirm = true
+                        },
+                        onNavigateToFindings: {
+                            appState.selectedFindingFilterIndex = 2 // Switch to Review filter
+                            appState.selectedSection = .findings
                         }
                     )
                 }
@@ -554,6 +558,7 @@ struct OpportunitiesSummaryCard: View {
     let reviewBytes: Int64
     let duplicateBytes: Int64
     let onCleanSafely: () -> Void
+    let onNavigateToFindings: () -> Void
 
     var body: some View {
         HStack(spacing: 16) {
@@ -597,7 +602,22 @@ struct OpportunitiesSummaryCard: View {
                 }
 
                 HStack(spacing: 12) {
-                    Text("Review Recommended: \(ByteCountFormatter.string(fromByteCount: reviewBytes, countStyle: .file))")
+                    if reviewBytes > 0 {
+                        Button(action: onNavigateToFindings) {
+                            HStack(spacing: 4) {
+                                Text("Review Recommended:")
+                                Text(ByteCountFormatter.string(fromByteCount: reviewBytes, countStyle: .file))
+                                    .fontWeight(.bold)
+                                Image(systemName: "chevron.right")
+                                    .font(.caption2)
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.accentColor)
+                    } else {
+                        Text("Review Recommended: \(ByteCountFormatter.string(fromByteCount: reviewBytes, countStyle: .file))")
+                    }
+
                     Text("•")
                     Text("Duplicates: \(ByteCountFormatter.string(fromByteCount: duplicateBytes, countStyle: .file))")
                 }
