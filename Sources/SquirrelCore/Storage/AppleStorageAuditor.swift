@@ -136,8 +136,8 @@ public struct AppleStorageAuditor {
             }
         }
 
-        // 3. Fast directory measurements for user categories
-        func measurePath(_ path: String) -> Int64 {
+        // 3. Fast directory measurements for user categories using concurrent tasks
+        func measurePathSync(_ path: String) -> Int64 {
             guard fm.fileExists(atPath: path) else { return 0 }
             let proc = Process()
             proc.executableURL = URL(fileURLWithPath: "/usr/bin/du")
@@ -156,32 +156,74 @@ public struct AppleStorageAuditor {
             return 0
         }
 
-        let sysApps = measurePath("/System/Applications")
-        let mainApps = measurePath("/Applications")
-        let userApps = measurePath("\(home)/Applications")
-        let applicationsBytes = sysApps + mainApps + userApps
+        // Measure all distinct top-level directories concurrently
+        var pathsToMeasure: [String] = [
+            "/System/Applications",
+            "/Applications",
+            "\(home)/Applications",
+            "\(home)/Library/Developer",
+            "\(home)/.Trash",
+            "\(home)/Documents",
+            "\(home)/Downloads",
+            "\(home)/Desktop",
+            "\(home)/Movies",
+            "\(home)/Music",
+            "\(home)/Pictures"
+        ]
 
-        let developerBytes = measurePath("\(home)/Library/Developer")
-        let trashBytes = measurePath("\(home)/.Trash")
-
-        // Documents: Measures main user-authored content in HOME
-        let docsDir = measurePath("\(home)/Documents")
-        let downloadsDir = measurePath("\(home)/Downloads")
-        let desktopDir = measurePath("\(home)/Desktop")
-        let moviesDir = measurePath("\(home)/Movies")
-        let musicDir = measurePath("\(home)/Music")
-        let picturesDir = measurePath("\(home)/Pictures")
-
-        // Also check top-level workspace projects in HOME (like attendly, Geniusphere, .gemini)
-        var extraProjectsBytes: Int64 = 0
         if let homeEntries = try? fm.contentsOfDirectory(atPath: home) {
             let standardDirs = Set(["Library", "Applications", "Documents", "Downloads", "Desktop", "Movies", "Music", "Pictures", ".Trash"])
             for entry in homeEntries where !standardDirs.contains(entry) {
                 let fullPath = "\(home)/\(entry)"
                 var isDir: ObjCBool = false
                 if fm.fileExists(atPath: fullPath, isDirectory: &isDir), isDir.boolValue {
-                    extraProjectsBytes += measurePath(fullPath)
+                    pathsToMeasure.append(fullPath)
                 }
+            }
+        }
+
+        let pathSizes: [String: Int64] = await withTaskGroup(of: (String, Int64).self) { group in
+            for path in pathsToMeasure {
+                group.addTask {
+                    let size = measurePathSync(path)
+                    return (path, size)
+                }
+            }
+            var dict: [String: Int64] = [:]
+            for await (p, s) in group {
+                dict[p] = s
+            }
+            return dict
+        }
+
+        let sysApps = pathSizes["/System/Applications"] ?? 0
+        let mainApps = pathSizes["/Applications"] ?? 0
+        let userApps = pathSizes["\(home)/Applications"] ?? 0
+        let applicationsBytes = sysApps + mainApps + userApps
+
+        let developerBytes = pathSizes["\(home)/Library/Developer"] ?? 0
+        let trashBytes = pathSizes["\(home)/.Trash"] ?? 0
+
+        let docsDir = pathSizes["\(home)/Documents"] ?? 0
+        let downloadsDir = pathSizes["\(home)/Downloads"] ?? 0
+        let desktopDir = pathSizes["\(home)/Desktop"] ?? 0
+        let moviesDir = pathSizes["\(home)/Movies"] ?? 0
+        let musicDir = pathSizes["\(home)/Music"] ?? 0
+        let picturesDir = pathSizes["\(home)/Pictures"] ?? 0
+
+        var extraProjectsBytes: Int64 = 0
+        for (path, size) in pathSizes {
+            if path.hasPrefix("\(home)/") &&
+               !path.hasPrefix("\(home)/Library") &&
+               !path.hasPrefix("\(home)/Applications") &&
+               !path.hasPrefix("\(home)/Documents") &&
+               !path.hasPrefix("\(home)/Downloads") &&
+               !path.hasPrefix("\(home)/Desktop") &&
+               !path.hasPrefix("\(home)/Movies") &&
+               !path.hasPrefix("\(home)/Music") &&
+               !path.hasPrefix("\(home)/Pictures") &&
+               !path.hasPrefix("\(home)/.Trash") {
+                extraProjectsBytes += size
             }
         }
 

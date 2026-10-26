@@ -68,7 +68,7 @@ public actor DuplicateDetector {
             }
         }
 
-        // Step 5: Final Content Verification (Byte-by-byte confirmation)
+        // Step 5: Final Content Verification (Byte-by-byte confirmation with streaming 64 KB buffers)
         var verifiedGroups: [DuplicateGroup] = []
 
         for (key, files) in fullHashGroups where files.count > 1 {
@@ -82,10 +82,12 @@ public actor DuplicateDetector {
             var confirmedFiles: [StorageItem] = [primary]
 
             for candidate in files.dropFirst() {
-                // Confirm 100% full content match
-                if FileManager.default.contentsEqual(atPath: primary.path, andPath: candidate.path) {
+                if isCancelled || Task.isCancelled { break }
+                // Confirm 100% full content match using bounded streaming chunks
+                if compareFilesStreaming(path1: primary.path, path2: candidate.path) {
                     confirmedFiles.append(candidate)
                 }
+                await Task.yield()
             }
 
             guard confirmedFiles.count > 1 else { continue }
@@ -121,11 +123,32 @@ public actor DuplicateDetector {
         return verifiedGroups.sorted { $0.potentialReclaimableBytes > $1.potentialReclaimableBytes }
     }
 
+    /// Compares two files byte-by-byte using a streaming 64 KB buffer to avoid reading entire large files into memory.
+    private func compareFilesStreaming(path1: String, path2: String) -> Bool {
+        guard let h1 = FileHandle(forReadingAtPath: path1) else { return false }
+        defer { try? h1.close() }
+        guard let h2 = FileHandle(forReadingAtPath: path2) else { return false }
+        defer { try? h2.close() }
+
+        let bufferSize = 64 * 1024
+        while true {
+            if isCancelled || Task.isCancelled { return false }
+            let d1 = autoreleasepool { h1.readData(ofLength: bufferSize) }
+            let d2 = autoreleasepool { h2.readData(ofLength: bufferSize) }
+            if d1 != d2 {
+                return false
+            }
+            if d1.isEmpty {
+                return true
+            }
+        }
+    }
+
     private func computePrefixHash(path: String, maxBytes: Int) -> String? {
         guard let handle = FileHandle(forReadingAtPath: path) else { return nil }
         defer { try? handle.close() }
 
-        let data = handle.readData(ofLength: maxBytes)
+        let data = autoreleasepool { handle.readData(ofLength: maxBytes) }
         guard !data.isEmpty else { return nil }
         let digest = SHA256.hash(data: data)
         return digest.compactMap { String(format: "%02x", $0) }.joined()
@@ -139,7 +162,8 @@ public actor DuplicateDetector {
         let bufferSize = 64 * 1024 // 64 KB streaming buffer
 
         while true {
-            let chunk = handle.readData(ofLength: bufferSize)
+            if isCancelled || Task.isCancelled { return nil }
+            let chunk = autoreleasepool { handle.readData(ofLength: bufferSize) }
             if chunk.isEmpty { break }
             hasher.update(data: chunk)
         }

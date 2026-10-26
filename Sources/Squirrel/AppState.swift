@@ -70,6 +70,8 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     @Published public var reviewCount: Int = 0
     @Published public var keepCount: Int = 0
     @Published public var duplicateGroups: [DuplicateGroup] = []
+    @Published public var isScanningDuplicates: Bool = false
+    @Published public var duplicateScanProgressText: String = ""
     @Published public var inaccessibleLocations: [InaccessibleLocation] = []
     @Published public var treemapRoot: TreemapNode = TreemapNode(name: "Storage", path: "/", size: 0, category: .otherUserData, isDirectory: true)
     @Published public var activeTreemapRoot: TreemapNode = TreemapNode(name: "Storage", path: "/", size: 0, category: .otherUserData, isDirectory: true)
@@ -113,6 +115,8 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     private let duplicateDetector = DuplicateDetector()
     private let cleanupEngine = CleanupEngine()
     private let quarantineManager = QuarantineManager()
+    private var currentScanTask: Task<Void, Never>?
+    private var currentDuplicateTask: Task<Void, Never>?
 
     public init() {
         refreshVolumeMetrics()
@@ -240,7 +244,8 @@ public final class AppState: ObservableObject, @unchecked Sendable {
 
         self.scanTargetDescription = description
 
-        Task {
+        self.currentScanTask?.cancel()
+        self.currentScanTask = Task {
             let startFootprint = SystemTelemetry.captureCurrentProcessTelemetry().physicalFootprint
             let validRoots = roots.filter { fileManager.fileExists(atPath: $0.path) && fileManager.isReadableFile(atPath: $0.path) }
 
@@ -262,6 +267,27 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 }
             }
 
+            // Check cancellation before intensive post-processing
+            if Task.isCancelled || !result.completedNormally {
+                await MainActor.run {
+                    self.scanStatus = .cancelled
+                    self.scannedItems = []
+                    self.findings = []
+                    self.safeFindings = []
+                    self.reviewFindings = []
+                    self.keepFindings = []
+                    self.safeCount = 0
+                    self.reviewCount = 0
+                    self.keepCount = 0
+                    self.duplicateGroups = []
+                    self.inaccessibleLocations = []
+                    let emptyTreemap = TreemapNode(name: "Storage", path: "/", size: 0, category: .otherUserData, isDirectory: true)
+                    self.treemapRoot = emptyTreemap
+                    self.activeTreemapRoot = emptyTreemap
+                }
+                return
+            }
+
             // Classify findings and partition in background
             var computedFindings: [Finding] = []
             var safeList: [Finding] = []
@@ -271,6 +297,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
             let rules = ClassificationRules.shared
             let inaccessiblePaths = Set(result.inaccessibleLocations.map { $0.path })
             for item in result.items {
+                if Task.isCancelled { return }
                 if let finding = rules.classify(item: item, inaccessiblePaths: inaccessiblePaths) {
                     computedFindings.append(finding)
                     switch finding.eligibility {
@@ -281,20 +308,12 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 }
             }
 
+            if Task.isCancelled { return }
+
             // Build Treemap Hierarchy
             let rootTreemap = TreemapEngine.buildHierarchy(from: result.items)
 
-            let duplicates = await duplicateDetector.findDuplicates(items: result.items) { msg in
-                Task { @MainActor in
-                    self.scanProgress = ScanProgress(
-                        currentPath: msg,
-                        itemsScannedCount: result.items.count,
-                        bytesScannedTotal: result.totalLogicalBytes,
-                        currentCategory: "Duplicates",
-                        isComplete: false
-                    )
-                }
-            }
+            if Task.isCancelled { return }
 
             // Sort all collections once in background by allocated size
             let finalFindings = computedFindings.sorted { $0.allocatedSize > $1.allocatedSize }
@@ -315,7 +334,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
             BenchmarkManager.shared.recordScan(perfRecord)
 
             await MainActor.run {
-                if result.completedNormally {
+                if result.completedNormally && !Task.isCancelled {
                     self.scannedItems = result.items
                     self.findings = finalFindings
                     self.safeFindings = finalSafe
@@ -324,7 +343,6 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                     self.safeCount = finalSafe.count
                     self.reviewCount = finalReview.count
                     self.keepCount = finalKeep.count
-                    self.duplicateGroups = duplicates
                     self.inaccessibleLocations = result.inaccessibleLocations
                     self.treemapRoot = rootTreemap
                     self.activeTreemapRoot = rootTreemap
@@ -356,11 +374,49 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     public func cancelScan() {
+        currentScanTask?.cancel()
+        currentScanTask = nil
+        currentDuplicateTask?.cancel()
+        currentDuplicateTask = nil
         Task {
             await scanner.cancel()
             await duplicateDetector.cancel()
             await MainActor.run {
                 self.scanStatus = .cancelled
+                self.isScanningDuplicates = false
+            }
+        }
+    }
+
+    /// On-demand content duplicate scanner matching modular macOS tools (like Mole).
+    /// Scans only when user triggers it or navigates to the Duplicates view.
+    public func startDuplicateScan() {
+        guard !isScanningDuplicates else { return }
+        guard !scannedItems.isEmpty else {
+            // If no scan has been run yet, start a scan first
+            startScan()
+            return
+        }
+
+        isScanningDuplicates = true
+        duplicateScanProgressText = "Analyzing candidate files for duplicates..."
+        selectedDuplicatePaths.removeAll()
+
+        currentDuplicateTask?.cancel()
+        currentDuplicateTask = Task {
+            let items = self.scannedItems
+            let duplicates = await duplicateDetector.findDuplicates(items: items) { msg in
+                Task { @MainActor in
+                    self.duplicateScanProgressText = msg
+                }
+            }
+
+            await MainActor.run {
+                if !Task.isCancelled {
+                    self.duplicateGroups = duplicates
+                }
+                self.isScanningDuplicates = false
+                self.duplicateScanProgressText = ""
             }
         }
     }

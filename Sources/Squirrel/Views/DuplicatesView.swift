@@ -35,6 +35,33 @@ public struct DuplicatesView: View {
                 .cornerRadius(6)
                 .overlay(RoundedRectangle(cornerRadius: 6).stroke(Color.primary.opacity(0.1), lineWidth: 0.8))
 
+                if appState.isScanningDuplicates {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .controlSize(.small)
+                        Text(appState.duplicateScanProgressText.isEmpty ? "Scanning duplicates..." : appState.duplicateScanProgressText)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .lineLimit(1)
+                            .frame(maxWidth: 220)
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 4)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(6)
+                } else {
+                    Button(action: {
+                        appState.startDuplicateScan()
+                    }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: "magnifyingglass")
+                            Text(appState.duplicateGroups.isEmpty ? "Scan Duplicates" : "Re-scan")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                }
+
                 if !appState.selectedDuplicatePaths.isEmpty {
                     Button(role: .destructive, action: {
                         appState.showDuplicateConfirmSheet = true
@@ -54,18 +81,39 @@ public struct DuplicatesView: View {
 
             Divider()
 
-            if appState.duplicateGroups.isEmpty {
+            if appState.isScanningDuplicates && appState.duplicateGroups.isEmpty {
+                VStack(spacing: 16) {
+                    ProgressView()
+                        .controlSize(.large)
+                    Text("Scanning for Exact Duplicates...")
+                        .font(.headline)
+                    Text(appState.duplicateScanProgressText.isEmpty ? "Analyzing candidates with cryptographic SHA-256 and byte confirmation..." : appState.duplicateScanProgressText)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .multilineTextAlignment(.center)
+                        .frame(maxWidth: 380)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if appState.duplicateGroups.isEmpty {
                 VStack(spacing: 14) {
                     Image(systemName: "doc.on.doc.fill")
                         .font(.system(size: 46))
                         .foregroundColor(.secondary.opacity(0.7))
                     Text("No Exact Duplicates Found")
                         .font(.headline)
-                    Text("All scanned candidate files have unique byte contents across the scanned directory.")
+                    Text(appState.scannedItems.isEmpty ? "Run a system scan or click 'Scan Duplicates' above to analyze candidate files." : "All scanned candidate files have unique byte contents across the scanned directory.")
                         .font(.subheadline)
                         .foregroundColor(.secondary)
                         .multilineTextAlignment(.center)
                         .frame(maxWidth: 360)
+
+                    if !appState.scannedItems.isEmpty && !appState.isScanningDuplicates {
+                        Button("Scan Candidate Duplicates Now") {
+                            appState.startDuplicateScan()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .padding(.top, 4)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
