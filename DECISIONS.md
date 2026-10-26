@@ -44,3 +44,19 @@
 ## ADR-007: Universal Binary Target & Intel Verification Boundary
 - **Context:** The build pipeline produces a fat Mach-O Universal 2 binary supporting `arm64` and `x86_64` using `lipo`.
 - **Decision:** Compile both architecture targets in the environment, but **explicitly document Intel runtime compatibility as unverified** until executed on physical Intel hardware or an Intel CI runner.
+
+## ADR-008: Trustworthy Storage Accounting Over Inflated Cleanup Claims
+- **Context:** Disk cleaning utilities frequently mislead users by displaying bloated logical file sizes as "reclaimable space," ignoring APFS sparse files, hard links, local snapshots, and purgeable storage.
+- **Decision:**
+  - Squirrel's primary competitive value is **trustworthy accounting and predictable behavior**, not the highest claimed cleanup number.
+  - All disk calculations must use live Darwin POSIX `stat()` / `lstat()` block allocations and `URLResourceKey` volume capacity metrics.
+  - Cleanup verification must report 5 distinct metrics: (1) Logical Bytes Identified, (2) Estimated Reclaimable Storage, (3) Bytes Successfully Processed, (4) Observed Volume Capacity Delta, and (5) Verified Reclaimed Storage.
+  - When APFS snapshots or shared extents prevent immediate physical capacity recovery, Squirrel must honestly label the outcome as `Delayed Accounting / Snapshot Retained` rather than claiming immediate recovery.
+
+## ADR-009: Permission Stability & Security-Scoped Bookmark Lifecycle
+- **Context:** Repeatedly prompting users for directory permissions on every scan disrupts workflow and degrades user trust.
+- **Decision:**
+  - Centralize authorization in `FolderAccessManager` using persistent security-scoped bookmarks (in sandboxed environments) and persistent URL bookmarks (in native builds), stored in `~/Library/Application Support/Squirrel/authorized_folders.json`.
+  - When an authorized directory is scanned, resolve the saved bookmark and balance access with `startAccessingSecurityScopedResource()` and `stopAccessingSecurityScopedResource()` on every exit path.
+  - One authorization record per distinct location: an authorization grant for one folder must never be treated as a grant for unrelated protected directories.
+  - Provide a dedicated Folder Access management UI allowing users to view, scan, reauthorize, or revoke granted locations without re-prompting.

@@ -315,21 +315,38 @@ public final class AppState: ObservableObject, @unchecked Sendable {
             BenchmarkManager.shared.recordScan(perfRecord)
 
             await MainActor.run {
-                self.scannedItems = result.items
-                self.findings = finalFindings
-                self.safeFindings = finalSafe
-                self.reviewFindings = finalReview
-                self.keepFindings = finalKeep
-                self.safeCount = finalSafe.count
-                self.reviewCount = finalReview.count
-                self.keepCount = finalKeep.count
-                self.duplicateGroups = duplicates
-                self.inaccessibleLocations = result.inaccessibleLocations
-                self.treemapRoot = rootTreemap
-                self.activeTreemapRoot = rootTreemap
-                self.selectedTreemapNode = rootTreemap.children.first
-                self.scanStatus = result.completedNormally ? .completed : .cancelled
-                self.lastScanDate = Date()
+                if result.completedNormally {
+                    self.scannedItems = result.items
+                    self.findings = finalFindings
+                    self.safeFindings = finalSafe
+                    self.reviewFindings = finalReview
+                    self.keepFindings = finalKeep
+                    self.safeCount = finalSafe.count
+                    self.reviewCount = finalReview.count
+                    self.keepCount = finalKeep.count
+                    self.duplicateGroups = duplicates
+                    self.inaccessibleLocations = result.inaccessibleLocations
+                    self.treemapRoot = rootTreemap
+                    self.activeTreemapRoot = rootTreemap
+                    self.scanStatus = .completed
+                    self.lastScanDate = Date()
+                } else {
+                    self.scanStatus = .cancelled
+                    self.scannedItems = []
+                    self.findings = []
+                    self.safeFindings = []
+                    self.reviewFindings = []
+                    self.keepFindings = []
+                    self.safeCount = 0
+                    self.reviewCount = 0
+                    self.keepCount = 0
+                    self.duplicateGroups = []
+                    self.inaccessibleLocations = []
+                    let emptyTreemap = TreemapNode(name: "Storage", path: "/", size: 0, category: .otherUserData, isDirectory: true)
+                    self.treemapRoot = emptyTreemap
+                    self.activeTreemapRoot = emptyTreemap
+                    // Incomplete scan: lastScanDate is NOT updated
+                }
                 self.lastScanDuration = result.scanDurationSeconds
                 self.lastScanPerformance = perfRecord
                 self.refreshVolumeMetrics()

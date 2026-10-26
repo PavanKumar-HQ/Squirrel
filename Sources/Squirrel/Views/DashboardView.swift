@@ -72,6 +72,11 @@ public struct DashboardView: View {
                     })
                 }
 
+                // Incomplete / Cancelled Notification Banner
+                if appState.scanStatus == .cancelled {
+                    ScanCancelledCard()
+                }
+
                 // 4. Opportunities Summary & Action Banner
                 if appState.scanStatus == .completed {
                     OpportunitiesSummaryCard(
@@ -513,6 +518,34 @@ struct ScanProgressCard: View {
         }
         .padding(12)
         .solidCard(cornerRadius: 8)
+    }
+}
+
+struct ScanCancelledCard: View {
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "exclamationmark.octagon.fill")
+                .font(.system(size: 20))
+                .foregroundColor(.orange)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Scan Incomplete (Cancelled by User)")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundColor(.primary)
+                Text("Traversal was interrupted before all folders were indexed. Findings reflect partial traversal only, and cleanup actions are withheld until a complete scan finishes.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+        }
+        .padding(12)
+        .background(Color.orange.opacity(0.12))
+        .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
+        )
     }
 }
 
