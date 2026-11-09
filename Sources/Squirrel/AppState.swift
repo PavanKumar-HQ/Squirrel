@@ -158,6 +158,10 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         refreshFolderAccess()
         refreshTools()
         refreshSnapshots()
+
+        // Automatically start scanning on launch so user immediately sees real reclaimable space
+        startScan()
+        scanProjects()
     }
 
     public func refreshFolderAccess() {
@@ -289,6 +293,22 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                     defaultRoots.append(candidate)
                 }
             }
+
+            // Also add all top-level project folders in $HOME (e.g. attendly, Geniusphere)
+            let systemBases: Set<String> = [
+                "Library", "Applications", "Movies", "Music", "Pictures", "Public", "Desktop", "System"
+            ]
+            if let homeContents = try? fileManager.contentsOfDirectory(at: home, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+                for itemURL in homeContents {
+                    let base = itemURL.lastPathComponent
+                    guard !systemBases.contains(base), !defaultRoots.contains(itemURL) else { continue }
+                    var isDir: ObjCBool = false
+                    if fileManager.fileExists(atPath: itemURL.path, isDirectory: &isDir), isDir.boolValue {
+                        defaultRoots.append(itemURL)
+                    }
+                }
+            }
+
             roots = defaultRoots
             description = "Comprehensive Sweep (Downloads, Caches, Developer, Repos, Trash)"
         }
@@ -672,27 +692,28 @@ public final class AppState: ObservableObject, @unchecked Sendable {
 
     // MARK: - Mole Integration: Project Purge, Native Tools & Snapshots
 
-    @MainActor
     public func scanProjects() {
-        guard !isScanningProjects else { return }
-        isScanningProjects = true
-        projectScanProgressText = "Discovering project workspaces..."
+        Task { @MainActor in
+            guard !self.isScanningProjects else { return }
+            self.isScanningProjects = true
+            self.projectScanProgressText = "Discovering project workspaces..."
 
-        currentProjectScanTask?.cancel()
-        currentProjectScanTask = Task {
-            let roots = ProjectPurgeScanner.defaultProjectRoots()
-            let projects = await projectPurgeScanner.scanProjects(roots: roots) { prog in
-                Task { @MainActor in
-                    self.projectScanProgressText = prog
+            self.currentProjectScanTask?.cancel()
+            self.currentProjectScanTask = Task {
+                let roots = ProjectPurgeScanner.defaultProjectRoots()
+                let projects = await self.projectPurgeScanner.scanProjects(roots: roots) { prog in
+                    Task { @MainActor in
+                        self.projectScanProgressText = prog
+                    }
                 }
-            }
 
-            await MainActor.run {
-                if !Task.isCancelled {
-                    self.discoveredProjects = projects
+                await MainActor.run {
+                    if !Task.isCancelled {
+                        self.discoveredProjects = projects
+                    }
+                    self.isScanningProjects = false
+                    self.projectScanProgressText = ""
                 }
-                self.isScanningProjects = false
-                self.projectScanProgressText = ""
             }
         }
     }

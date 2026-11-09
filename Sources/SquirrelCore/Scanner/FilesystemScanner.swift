@@ -193,6 +193,13 @@ public actor FilesystemScanner {
             .isWritableKey
         ]
 
+        let artifactDirNames: Set<String> = [
+            "node_modules", ".next", ".turbo", ".nuxt", ".output",
+            "target", "build", "dist", "venv", ".venv", ".pytest_cache",
+            ".mypy_cache", ".ruff_cache", "DerivedData", "Pods", ".build",
+            ".gradle", ".cxx", ".dart_tool", ".zig-cache", "zig-out"
+        ]
+
         var enumErrors: [InaccessibleLocation] = []
         let enumerator = FileManager.default.enumerator(
             at: url,
@@ -263,6 +270,32 @@ public actor FilesystemScanner {
                 let isHardLinkDuplicate = scannedInodes.contains(inodeKey)
                 scannedInodes.insert(inodeKey)
 
+                // High-efficiency artifact directory aggregation:
+                // Treat heavy regenerable build/dependency folders as single cohesive units
+                if isDirectory && artifactDirNames.contains(fileURL.lastPathComponent) {
+                    fileEnumerator.skipDescendants()
+                    let (dirLogical, dirAllocated) = Self.calculateDirectorySizes(at: fileURL)
+                    totalLogical += dirLogical
+                    totalAllocated += dirAllocated
+
+                    let item = StorageItem(
+                        url: fileURL,
+                        path: fileURL.path,
+                        name: resourceValues.name ?? fileURL.lastPathComponent,
+                        logicalSize: dirLogical,
+                        allocatedSize: dirAllocated,
+                        isDirectory: true,
+                        isSymbolicLink: false,
+                        deviceId: statBuf.st_dev,
+                        inode: statBuf.st_ino,
+                        modificationDate: resourceValues.contentModificationDate,
+                        isReadable: resourceValues.isReadable ?? true,
+                        isWritable: resourceValues.isWritable ?? true
+                    )
+                    discoveredItems.append(item)
+                    continue
+                }
+
                 let logicalSize = Int64(resourceValues.fileSize ?? 0)
                 let posixAllocatedSize = Int64(statBuf.st_blocks) * 512
                 let allocatedSize = posixAllocatedSize > 0 ? posixAllocatedSize : Int64(resourceValues.totalFileAllocatedSize ?? resourceValues.fileAllocatedSize ?? Int(logicalSize))
@@ -297,6 +330,26 @@ public actor FilesystemScanner {
         if !enumErrors.isEmpty {
             inaccessible.append(contentsOf: enumErrors)
         }
+    }
+
+    public static func calculateDirectorySizes(at url: URL) -> (logical: Int64, allocated: Int64) {
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileSizeKey],
+            options: []
+        ) else { return (0, 0) }
+
+        var logSize: Int64 = 0
+        var allocSize: Int64 = 0
+        while let fileURL = enumerator.nextObject() as? URL {
+            if let vals = try? fileURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileSizeKey]) {
+                let s = Int64(vals.fileSize ?? 0)
+                let a = Int64(vals.totalFileAllocatedSize ?? Int(s))
+                logSize += s
+                allocSize += a
+            }
+        }
+        return (logSize, allocSize)
     }
 
     private func determineCategory(for item: StorageItem) -> StorageCategory {
