@@ -98,7 +98,7 @@ public actor ProjectPurgeScanner {
 
         // Also discover any user project folder directly in $HOME (excluding standard macOS system folders)
         let systemBases: Set<String> = [
-            "Library", "Applications", "Movies", "Music", "Pictures", "Public", "Desktop", "System"
+            "Library", "Applications", "Movies", "Music", "Pictures", "Public", "Desktop", "System", "Documents"
         ]
         if let homeContents = try? fileManager.contentsOfDirectory(at: home, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
             for itemURL in homeContents {

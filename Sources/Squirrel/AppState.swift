@@ -296,7 +296,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
 
             // Also add all top-level project folders in $HOME (e.g. attendly, Geniusphere)
             let systemBases: Set<String> = [
-                "Library", "Applications", "Movies", "Music", "Pictures", "Public", "Desktop", "System"
+                "Library", "Applications", "Movies", "Music", "Pictures", "Public", "Desktop", "System", "Documents"
             ]
             if let homeContents = try? fileManager.contentsOfDirectory(at: home, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
                 for itemURL in homeContents {
