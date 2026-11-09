@@ -32,51 +32,131 @@ public struct ClassificationRules {
             )
         }
 
-        // Rule: Disposable Project Build Caches (e.g., .next, .turbo, .npm/_cacache, .cache)
-        if isDisposableBuildCache(path: pathLower, name: nameLower) {
+        // Rule 1: Xcode DerivedData
+        if pathLower.contains("/developer/xcode/deriveddata") {
             return Finding(
-                category: .userCaches,
-                title: "Project Build Cache (\(item.name))",
+                category: .developerCaches,
+                title: "Xcode DerivedData: \(item.name)",
                 path: item.path,
                 logicalSize: item.logicalSize,
                 allocatedSize: item.allocatedSize,
                 modificationDate: item.modificationDate,
-                ruleId: "RULE-BUILD-CACHE",
-                ruleDescription: "Compiler and bundler intermediate build artifacts (e.g., Next.js, Turborepo, npm cache).",
+                ruleId: "RULE-XCODE-DERIVEDDATA",
+                ruleDescription: "Xcode intermediate build products, indexes, and compilation modules.",
                 evidence: [
-                    "Identified disposable build cache: \(item.name)",
-                    "User source files, configurations, and git repositories are completely outside this directory"
+                    "Located inside ~/Library/Developer/Xcode/DerivedData",
+                    "Regenerated automatically on next project build"
+                ],
+                eligibility: .safeToClean,
+                riskLevel: .low,
+                recoveryMethod: .macOSTrash,
+                estimatedReclaimableBytes: item.allocatedSize,
+                consequencesExplanation: "Xcode will automatically re-index and rebuild compilation artifacts the next time you compile the project."
+            )
+        }
+
+        // Rule 2: Xcode iOS DeviceSupport & Simulator Caches
+        if pathLower.contains("/developer/xcode/ios devicesupport") ||
+           pathLower.contains("/developer/xcode/watchos devicesupport") ||
+           pathLower.contains("/developer/coresimulator/caches") {
+            let isDeviceSupport = pathLower.contains("devicesupport")
+            return Finding(
+                category: .developerCaches,
+                title: isDeviceSupport ? "Xcode Device Support Symbols: \(item.name)" : "CoreSimulator Cache: \(item.name)",
+                path: item.path,
+                logicalSize: item.logicalSize,
+                allocatedSize: item.allocatedSize,
+                modificationDate: item.modificationDate,
+                ruleId: isDeviceSupport ? "RULE-XCODE-DEVICESUPPORT" : "RULE-XCODE-SIMULATOR-CACHE",
+                ruleDescription: isDeviceSupport ? "Symbol files cached from connected iOS/watchOS devices for debug symbolication." : "Simulator runtime and image cache.",
+                evidence: [
+                    "Located inside Xcode Developer directories",
+                    isDeviceSupport ? "Historical device debug symbols" : "Simulator runtime cache"
+                ],
+                eligibility: isDeviceSupport ? .reviewRecommended : .safeToClean,
+                riskLevel: isDeviceSupport ? .medium : .low,
+                recoveryMethod: .macOSTrash,
+                estimatedReclaimableBytes: item.allocatedSize,
+                consequencesExplanation: isDeviceSupport
+                    ? "Symbolic files for older iOS versions will be removed. Xcode will re-fetch symbols if you reconnect the device."
+                    : "Simulator caches will be cleaned; rebuilt on next simulator launch."
+            )
+        }
+
+        // Rule 3: Package Manager & Toolchain Caches (npm, pnpm, yarn, pip, uv, cargo, go-build, gradle, maven, cocoapods)
+        if isPackageManagerCache(path: pathLower, name: nameLower) {
+            let toolName = identifyToolName(path: pathLower, name: nameLower)
+            return Finding(
+                category: .developerCaches,
+                title: "\(toolName) Cache (\(item.name))",
+                path: item.path,
+                logicalSize: item.logicalSize,
+                allocatedSize: item.allocatedSize,
+                modificationDate: item.modificationDate,
+                ruleId: "RULE-PKG-CACHE",
+                ruleDescription: "Downloaded package archives, precompiled binaries, or bytecode stored by \(toolName).",
+                evidence: [
+                    "Identified toolchain cache directory: \(toolName)",
+                    "Packages are downloaded on demand if needed again"
+                ],
+                eligibility: .safeToClean,
+                riskLevel: .low,
+                recoveryMethod: .macOSTrash,
+                estimatedReclaimableBytes: item.allocatedSize,
+                consequencesExplanation: "\(toolName) will re-download packages on next install if not already cached locally."
+            )
+        }
+
+        // Rule 4: Project Build Artifacts (node_modules, target, dist, build, .venv, .next, etc.)
+        if isProjectPurgeTarget(path: pathLower, name: nameLower) {
+            let artifactType = identifyArtifactType(name: nameLower)
+            let isBuildCache = (nameLower == ".next" || nameLower == ".turbo")
+            let ruleId = isBuildCache ? "RULE-BUILD-CACHE" : "RULE-PROJECT-PURGE"
+            return Finding(
+                category: .projectArtifacts,
+                title: "Project Artifact: \(item.name) (\(artifactType))",
+                path: item.path,
+                logicalSize: item.logicalSize,
+                allocatedSize: item.allocatedSize,
+                modificationDate: item.modificationDate,
+                ruleId: ruleId,
+                ruleDescription: "Heavy project dependency or build output directory (\(artifactType)).",
+                evidence: [
+                    "Matches project artifact signature: \(item.name)",
+                    "Source files, configs, and git history remain fully untouched outside this directory"
                 ],
                 eligibility: .reviewRecommended,
                 riskLevel: .low,
                 recoveryMethod: .macOSTrash,
                 estimatedReclaimableBytes: item.allocatedSize,
-                consequencesExplanation: "Only compiled bytecode, sourcemaps, and server bundles are moved to macOS Trash. User source code (src/, app/, pages/, package.json, .env, .git) is completely untouched. Your framework regenerates this folder automatically upon next run."
+                consequencesExplanation: "Removes compiled build artifacts or installed dependencies. They can be reinstalled anytime using your project package manager (e.g. npm install, cargo build)."
             )
         }
 
-        // Rule: Developer artifacts - explicitly excluded from first-release cleanup
-        if isDeveloperArtifact(path: pathLower) {
+        // Rule 5: Sandboxed App Container Caches
+        if isContainerCache(path: pathLower) {
             return Finding(
-                category: .otherUserData,
-                title: "Development Artifact (\(item.name))",
+                category: .appContainers,
+                title: "App Container Cache: \(item.name)",
                 path: item.path,
                 logicalSize: item.logicalSize,
                 allocatedSize: item.allocatedSize,
                 modificationDate: item.modificationDate,
-                ruleId: "RULE-DEV-EXCLUDE",
-                ruleDescription: "Developer build caches, dependencies, and environments are intentionally excluded from cleanup in v1.0 to prevent breaking developer workflows.",
-                evidence: ["Matches developer workspace pattern: \(item.name)"],
-                eligibility: .keep,
-                riskLevel: .high,
+                ruleId: "RULE-CONTAINER-CACHE",
+                ruleDescription: "Sandboxed application container caches stored under ~/Library/Containers or Group Containers.",
+                evidence: [
+                    "Located inside sandboxed container cache path",
+                    "Temporary application cache data"
+                ],
+                eligibility: .safeToClean,
+                riskLevel: .low,
                 recoveryMethod: .macOSTrash,
-                estimatedReclaimableBytes: 0,
-                consequencesExplanation: "Removing active project dependencies or build caches can corrupt compilation workflows or require lengthy re-downloads.",
-                exclusionReason: "Developer workspace protection policy"
+                estimatedReclaimableBytes: item.allocatedSize,
+                consequencesExplanation: "Applications will regenerate necessary caches automatically when opened."
             )
         }
 
-        // Rule: User Caches
+        // Rule 6: User Caches (~/Library/Caches)
         if pathLower.contains("/library/caches/") || pathLower.hasSuffix("/library/caches") {
             let isOld = isOlderThan(date: item.modificationDate, days: 7)
             let eligibility: CleanupEligibility = isOld ? .safeToClean : .reviewRecommended
@@ -103,7 +183,7 @@ public struct ClassificationRules {
             )
         }
 
-        // Rule: System & App Logs
+        // Rule 7: System & App Logs
         if pathLower.contains("/library/logs/") || nameLower.hasSuffix(".log") || nameLower.hasSuffix(".diag") || nameLower.hasSuffix(".crash") {
             let isOld = isOlderThan(date: item.modificationDate, days: 14)
             let eligibility: CleanupEligibility = isOld ? .safeToClean : .reviewRecommended
@@ -129,7 +209,7 @@ public struct ClassificationRules {
             )
         }
 
-        // Rule: Download Installers & Disk Images
+        // Rule 8: Download Installers & Disk Images
         if nameLower.hasSuffix(".dmg") || nameLower.hasSuffix(".pkg") || nameLower.hasSuffix(".iso") {
             return Finding(
                 category: .downloadsAndInstallers,
@@ -152,7 +232,7 @@ public struct ClassificationRules {
             )
         }
 
-        // Rule: Large Files
+        // Rule 9: Large Files
         if item.logicalSize >= 100 * 1024 * 1024 {
             return Finding(
                 category: .largeFiles,
@@ -177,23 +257,66 @@ public struct ClassificationRules {
         return nil
     }
 
-    private func isDisposableBuildCache(path: String, name: String) -> Bool {
-        if name == ".next" || path.contains("/.next/") || path.hasSuffix("/.next") { return true }
-        if name == ".turbo" || path.contains("/.turbo/") || path.hasSuffix("/.turbo") { return true }
-        if path.contains("/.npm/_cacache/") || path.hasSuffix("/.npm/_cacache") { return true }
-        if path.contains("/.cache/") || path.hasSuffix("/.cache") { return true }
+    private func isPackageManagerCache(path: String, name: String) -> Bool {
+        if path.contains("/.npm/_cacache") || path.hasSuffix("/.npm/_cacache") { return true }
+        if path.contains("/library/caches/pnpm") || path.contains("/.local/share/pnpm/store") { return true }
+        if path.contains("/library/caches/yarn") { return true }
+        if path.contains("/library/caches/pip") { return true }
+        if path.contains("/.cache/uv") || path.contains("/library/caches/uv") { return true }
+        if path.contains("/.cache/poetry") || path.contains("/library/caches/pypoetry") { return true }
+        if path.contains("/.cargo/registry/cache") || path.contains("/.rustup/downloads") { return true }
+        if path.contains("/library/caches/go-build") { return true }
+        if path.contains("/.gradle/caches") { return true }
+        if path.contains("/.m2/repository") { return true }
+        if path.contains("/library/caches/cocoapods") { return true }
+        if path.contains("/library/caches/homebrew") { return true }
         return false
     }
 
-    private func isDeveloperArtifact(path: String) -> Bool {
-        return path.contains("/deriveddata/") ||
-               path.contains("/node_modules/") ||
-               path.contains("/.cargo/") ||
-               path.contains("/.rustup/") ||
-               path.contains("/docker/") ||
-               path.contains("/.gradle/") ||
-               path.contains("/target/debug/") ||
-               path.contains("/target/release/")
+    private func identifyToolName(path: String, name: String) -> String {
+        if path.contains("npm") { return "npm" }
+        if path.contains("pnpm") { return "pnpm" }
+        if path.contains("yarn") { return "Yarn" }
+        if path.contains("pip") { return "pip" }
+        if path.contains("uv") { return "uv" }
+        if path.contains("poetry") { return "Poetry" }
+        if path.contains("cargo") || path.contains("rustup") { return "Rust / Cargo" }
+        if path.contains("go-build") { return "Go" }
+        if path.contains("gradle") { return "Gradle" }
+        if path.contains(".m2") { return "Maven" }
+        if path.contains("cocoapods") { return "CocoaPods" }
+        if path.contains("homebrew") { return "Homebrew" }
+        return "Package Manager"
+    }
+
+    private func isProjectPurgeTarget(path: String, name: String) -> Bool {
+        let targets = [
+            "node_modules", "target", "dist", "build", "venv", ".venv",
+            ".next", ".turbo", ".nuxt", ".output", ".svelte-kit", ".astro",
+            ".dart_tool", ".zig-cache", "zig-out", "pods", ".cxx", ".build"
+        ]
+        return targets.contains(name)
+    }
+
+    private func identifyArtifactType(name: String) -> String {
+        switch name {
+        case "node_modules": return "Node.js Dependencies"
+        case "target": return "Rust / Cargo / Maven Build"
+        case "dist", "build": return "Compiled Build Output"
+        case "venv", ".venv": return "Python Virtual Environment"
+        case ".next": return "Next.js Build Cache"
+        case ".turbo": return "Turborepo Cache"
+        case ".svelte-kit": return "SvelteKit Cache"
+        case ".astro": return "Astro Build Cache"
+        case ".build": return "Swift Package Manager Build"
+        case "pods": return "CocoaPods Dependencies"
+        default: return "Build Artifact"
+        }
+    }
+
+    private func isContainerCache(path: String) -> Bool {
+        return (path.contains("/library/containers/") && path.contains("/data/library/caches/")) ||
+               (path.contains("/library/group containers/") && path.contains("/library/caches/"))
     }
 
     private func isOlderThan(date: Date?, days: Int) -> Bool {
@@ -211,9 +334,17 @@ public struct ClassificationRules {
         return false
     }
 
-    private func determineCategory(for item: StorageItem) -> StorageCategory {
+    public func determineCategory(for item: StorageItem) -> StorageCategory {
         let path = item.path.lowercased()
-        if path.contains("/caches/") || path.hasSuffix("/caches") {
+        let name = item.name.lowercased()
+
+        if path.contains("/developer/xcode/") || isPackageManagerCache(path: path, name: name) {
+            return .developerCaches
+        } else if isProjectPurgeTarget(path: path, name: name) {
+            return .projectArtifacts
+        } else if isContainerCache(path: path) {
+            return .appContainers
+        } else if path.contains("/caches/") || path.hasSuffix("/caches") {
             return .userCaches
         } else if path.contains("/logs/") || path.hasSuffix(".log") || path.hasSuffix(".diag") || path.hasSuffix(".crash") {
             return .systemLogs

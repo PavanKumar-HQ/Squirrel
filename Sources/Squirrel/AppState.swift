@@ -14,6 +14,9 @@ public enum NavigationSection: String, CaseIterable, Identifiable {
     case dashboard = "Dashboard"
     case findings = "Findings"
     case treemap = "Storage Treemap"
+    case projectPurge = "Project Purge"
+    case nativeTools = "Developer Tools"
+    case apfsSnapshots = "APFS Snapshots"
     case duplicates = "Exact Duplicates"
     case history = "History & Quarantine"
     case folderAccess = "Folder Access"
@@ -27,6 +30,9 @@ public enum NavigationSection: String, CaseIterable, Identifiable {
         case .dashboard: return "gauge.with.needle"
         case .findings: return "checklist"
         case .treemap: return "square.grid.3x3"
+        case .projectPurge: return "shippingbox"
+        case .nativeTools: return "hammer"
+        case .apfsSnapshots: return "camera.metering.matrix"
         case .duplicates: return "doc.on.doc"
         case .history: return "clock.arrow.circlepath"
         case .folderAccess: return "folder.badge.gearshape"
@@ -94,6 +100,29 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     @Published public var lastCleanupSummary: CleanupSummary? = nil
     @Published public var showCleanupSummarySheet: Bool = false
 
+    // Project Purge State (Mole-inspired)
+    @Published public var discoveredProjects: [ProjectCandidate] = []
+    @Published public var isScanningProjects: Bool = false
+    @Published public var projectScanProgressText: String = ""
+    @Published public var projectPurgeSearchText: String = ""
+    @Published public var selectedProjectPaths: Set<String> = []
+    @Published public var showConfirmPurge: Bool = false
+    @Published public var isPurgingProjects: Bool = false
+
+    // Native Developer Tools State (Mole-inspired)
+    @Published public var supportedTools: [SupportedTool] = []
+    @Published public var isRefreshingTools: Bool = false
+    @Published public var pruningToolName: String? = nil
+    @Published public var toolConsoleOutput: String = ""
+    @Published public var showToolConsoleSheet: Bool = false
+    @Published public var toolConsoleTitle: String = ""
+
+    // APFS Snapshots State (Mole-inspired)
+    @Published public var localSnapshots: [LocalSnapshot] = []
+    @Published public var isRefreshingSnapshots: Bool = false
+    @Published public var deletingSnapshotName: String? = nil
+    @Published public var showConfirmDeleteAllSnapshots: Bool = false
+
     // History and Quarantine
     @Published public var journalEntries: [JournalEntry] = []
     @Published public var quarantineRecords: [QuarantineRecord] = []
@@ -115,14 +144,20 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     private let duplicateDetector = DuplicateDetector()
     private let cleanupEngine = CleanupEngine()
     private let quarantineManager = QuarantineManager()
+    private let projectPurgeScanner = ProjectPurgeScanner.shared
+    private let nativeToolPruner = NativeToolPruner.shared
+    private let snapshotManager = SnapshotManager.shared
     private var currentScanTask: Task<Void, Never>?
     private var currentDuplicateTask: Task<Void, Never>?
+    private var currentProjectScanTask: Task<Void, Never>?
 
     public init() {
         refreshVolumeMetrics()
         refreshHistory()
         refreshTelemetry()
         refreshFolderAccess()
+        refreshTools()
+        refreshSnapshots()
     }
 
     public func refreshFolderAccess() {
@@ -234,15 +269,28 @@ public final class AppState: ObservableObject, @unchecked Sendable {
             roots = custom
             description = targetDescription ?? custom.first?.path ?? "Custom Selection"
         } else {
-            roots = [
+            var defaultRoots: [URL] = [
                 home.appendingPathComponent("Downloads", isDirectory: true),
                 home.appendingPathComponent("Library/Caches", isDirectory: true),
                 home.appendingPathComponent("Library/Logs", isDirectory: true),
+                home.appendingPathComponent("Library/Developer/Xcode/DerivedData", isDirectory: true),
+                home.appendingPathComponent("Library/Developer/CoreSimulator/Caches", isDirectory: true),
                 home.appendingPathComponent(".npm", isDirectory: true),
                 home.appendingPathComponent(".cache", isDirectory: true),
+                home.appendingPathComponent(".cargo/registry/cache", isDirectory: true),
+                home.appendingPathComponent(".gradle/caches", isDirectory: true),
                 home.appendingPathComponent(".Trash", isDirectory: true)
             ]
-            description = "Standard Folders (Downloads, Caches, Logs, Tools, Trash)"
+            // Add user developer workspaces if present
+            for dirName in ["Code", "Projects", "Developer", "Workspace", "Repos", "dev"] {
+                let candidate = home.appendingPathComponent(dirName, isDirectory: true)
+                var isDir: ObjCBool = false
+                if fileManager.fileExists(atPath: candidate.path, isDirectory: &isDir), isDir.boolValue {
+                    defaultRoots.append(candidate)
+                }
+            }
+            roots = defaultRoots
+            description = "Comprehensive Sweep (Downloads, Caches, Developer, Repos, Trash)"
         }
 
         self.scanTargetDescription = description
@@ -619,6 +667,120 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                     self.refreshHistory()
                 }
             }
+        }
+    }
+
+    // MARK: - Mole Integration: Project Purge, Native Tools & Snapshots
+
+    @MainActor
+    public func scanProjects() {
+        guard !isScanningProjects else { return }
+        isScanningProjects = true
+        projectScanProgressText = "Discovering project workspaces..."
+
+        currentProjectScanTask?.cancel()
+        currentProjectScanTask = Task {
+            let roots = ProjectPurgeScanner.defaultProjectRoots()
+            let projects = await projectPurgeScanner.scanProjects(roots: roots) { prog in
+                Task { @MainActor in
+                    self.projectScanProgressText = prog
+                }
+            }
+
+            await MainActor.run {
+                if !Task.isCancelled {
+                    self.discoveredProjects = projects
+                }
+                self.isScanningProjects = false
+                self.projectScanProgressText = ""
+            }
+        }
+    }
+
+    public func purgeProject(candidate: ProjectCandidate) {
+        Task {
+            for artifact in candidate.artifacts {
+                let url = URL(fileURLWithPath: artifact.path)
+                var resultingURL: NSURL?
+                _ = try? FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
+            }
+            await MainActor.run {
+                self.discoveredProjects.removeAll { $0.projectPath == candidate.projectPath }
+                self.refreshVolumeMetrics()
+            }
+        }
+    }
+
+    public func purgeSelectedProjects(paths: Set<String>) async {
+        let targets = discoveredProjects.filter { paths.contains($0.projectPath) }
+        for proj in targets {
+            for artifact in proj.artifacts {
+                let url = URL(fileURLWithPath: artifact.path)
+                var resultingURL: NSURL?
+                _ = try? FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
+            }
+        }
+        await MainActor.run {
+            self.discoveredProjects.removeAll { paths.contains($0.projectPath) }
+            self.refreshVolumeMetrics()
+        }
+    }
+
+    public func refreshTools() {
+        Task { @MainActor in
+            guard !self.isRefreshingTools else { return }
+            self.isRefreshingTools = true
+            let tools = await self.nativeToolPruner.discoverTools()
+            self.supportedTools = tools
+            self.isRefreshingTools = false
+        }
+    }
+
+    public func pruneTool(tool: SupportedTool) async -> ToolPruneResult {
+        let result = await nativeToolPruner.pruneTool(tool)
+        await MainActor.run {
+            self.refreshTools()
+            self.refreshVolumeMetrics()
+        }
+        return result
+    }
+
+    public func pruneAllInstalledTools() async {
+        let installed = supportedTools.filter { $0.isInstalled }
+        for tool in installed {
+            _ = await nativeToolPruner.pruneTool(tool)
+        }
+        await MainActor.run {
+            self.refreshTools()
+            self.refreshVolumeMetrics()
+        }
+    }
+
+    public func refreshSnapshots() {
+        Task { @MainActor in
+            guard !self.isRefreshingSnapshots else { return }
+            self.isRefreshingSnapshots = true
+            let snapshots = await self.snapshotManager.listLocalSnapshots()
+            self.localSnapshots = snapshots
+            self.isRefreshingSnapshots = false
+        }
+    }
+
+    public func deleteSnapshot(snapshot: LocalSnapshot) async {
+        _ = await snapshotManager.deleteSnapshot(snapshot)
+        await MainActor.run {
+            self.refreshSnapshots()
+            self.refreshVolumeMetrics()
+        }
+    }
+
+    public func deleteAllSnapshots() async {
+        for snap in localSnapshots {
+            _ = await snapshotManager.deleteSnapshot(snap)
+        }
+        await MainActor.run {
+            self.refreshSnapshots()
+            self.refreshVolumeMetrics()
         }
     }
 

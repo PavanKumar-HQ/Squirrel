@@ -129,6 +129,12 @@ public struct SquirrelApp: App {
                         FindingsListView(appState: appState)
                     case .treemap:
                         TreemapView(appState: appState)
+                    case .projectPurge:
+                        ProjectPurgeView(appState: appState)
+                    case .nativeTools:
+                        NativeToolsView(appState: appState)
+                    case .apfsSnapshots:
+                        SnapshotsView(appState: appState)
                     case .duplicates:
                         DuplicatesView(appState: appState)
                     case .history:
@@ -216,6 +222,13 @@ public struct SquirrelApp: App {
             return appState.authorizedFolders.isEmpty ? nil : appState.authorizedFolders.count
         case .permissions:
             return appState.inaccessibleLocations.isEmpty ? nil : appState.inaccessibleLocations.count
+        case .projectPurge:
+            return appState.discoveredProjects.isEmpty ? nil : appState.discoveredProjects.count
+        case .nativeTools:
+            let count = appState.supportedTools.filter { $0.isInstalled && $0.estimatedCacheBytes > 0 }.count
+            return count == 0 ? nil : count
+        case .apfsSnapshots:
+            return appState.localSnapshots.isEmpty ? nil : appState.localSnapshots.count
         case .history:
             return appState.quarantineRecords.isEmpty ? nil : appState.quarantineRecords.count
         case .dashboard, .treemap, .diagnostics:

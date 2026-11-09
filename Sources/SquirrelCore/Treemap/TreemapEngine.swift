@@ -218,17 +218,6 @@ public struct TreemapEngine {
     }
 
     private static func determineCategory(for item: StorageItem) -> StorageCategory {
-        let path = item.path.lowercased()
-        if path.contains("/caches/") || path.hasSuffix("/caches") {
-            return .userCaches
-        } else if path.contains("/logs/") || path.hasSuffix(".log") || path.hasSuffix(".diag") || path.hasSuffix(".crash") {
-            return .systemLogs
-        } else if path.hasSuffix(".dmg") || path.hasSuffix(".pkg") || path.hasSuffix(".iso") || path.contains("/downloads/") {
-            return .downloadsAndInstallers
-        } else if item.logicalSize >= 100 * 1024 * 1024 {
-            return .largeFiles
-        } else {
-            return .otherUserData
-        }
+        return ClassificationRules.shared.determineCategory(for: item)
     }
 }

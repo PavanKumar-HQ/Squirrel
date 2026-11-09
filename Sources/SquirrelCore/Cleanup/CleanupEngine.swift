@@ -530,6 +530,24 @@ public actor CleanupEngine {
                 continue
             }
 
+            // Step 1b: Active Process Safety Guard (protect running apps from cache deletion crashes)
+            let runningCheck = ProcessSafetyGuard.shared.isApplicationRunning(forPath: finding.path)
+            if runningCheck.isRunning, let appName = runningCheck.appName {
+                failed += 1
+                let reason = "\(appName) is actively running. Operation deferred to protect active application session."
+                failedDict[finding.path] = reason
+                journalManager.record(JournalEntry(
+                    originalPath: finding.path,
+                    sanitizedName: url.lastPathComponent,
+                    actionType: actionTypeFor(method: finding.recoveryMethod),
+                    status: .failed,
+                    bytesReclaimed: 0,
+                    recoveryMethod: finding.recoveryMethod,
+                    errorMessage: reason
+                ))
+                continue
+            }
+
             // Step 2: Execute based on approved recovery method
             do {
                 switch finding.recoveryMethod {

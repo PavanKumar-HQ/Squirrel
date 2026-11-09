@@ -93,6 +93,96 @@ public struct DashboardView: View {
                     )
                 }
 
+                // High-Yield Developer & System Clean Shortcuts
+                HStack(spacing: 12) {
+                    Button {
+                        appState.selectedSection = .projectPurge
+                    } label: {
+                        HStack(spacing: 10) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(SquirrelTheme.color(for: .projectArtifacts).opacity(0.15))
+                                    .frame(width: 32, height: 32)
+                                Image(systemName: "shippingbox.fill")
+                                    .foregroundColor(SquirrelTheme.color(for: .projectArtifacts))
+                                    .font(.system(size: 15))
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Project Purge")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Purge node_modules, target, .venv")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(10)
+                        .solidCard(cornerRadius: 8)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        appState.selectedSection = .nativeTools
+                    } label: {
+                        HStack(spacing: 10) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(SquirrelTheme.color(for: .developerCaches).opacity(0.15))
+                                    .frame(width: 32, height: 32)
+                                Image(systemName: "hammer.fill")
+                                    .foregroundColor(SquirrelTheme.color(for: .developerCaches))
+                                    .font(.system(size: 15))
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("Developer Tools")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Homebrew, Docker, pnpm, pip")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(10)
+                        .solidCard(cornerRadius: 8)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        appState.selectedSection = .apfsSnapshots
+                    } label: {
+                        HStack(spacing: 10) {
+                            ZStack {
+                                RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                    .fill(Color.purple.opacity(0.15))
+                                    .frame(width: 32, height: 32)
+                                Image(systemName: "camera.metering.matrix")
+                                    .foregroundColor(.purple)
+                                    .font(.system(size: 15))
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("APFS Snapshots")
+                                    .font(.system(size: 12, weight: .semibold))
+                                Text("Time Machine local snapshots")
+                                    .font(.system(size: 10))
+                                    .foregroundColor(.secondary)
+                            }
+                            Spacer()
+                            Image(systemName: "chevron.right")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        }
+                        .padding(10)
+                        .solidCard(cornerRadius: 8)
+                    }
+                    .buttonStyle(.plain)
+                }
+
                 // 5. Storage Distribution Breakdown Bar (Fast, zero-lag overview)
                 VStack(alignment: .leading, spacing: 10) {
                     HStack {
@@ -479,18 +569,7 @@ struct StorageCategoryBreakdownBar: View {
     }
 
     private func determineCategory(for item: StorageItem) -> StorageCategory {
-        let path = item.path.lowercased()
-        if path.contains("/caches/") || path.hasSuffix("/caches") {
-            return .userCaches
-        } else if path.contains("/logs/") || path.hasSuffix(".log") || path.hasSuffix(".diag") || path.hasSuffix(".crash") {
-            return .systemLogs
-        } else if path.hasSuffix(".dmg") || path.hasSuffix(".pkg") || path.hasSuffix(".iso") || path.contains("/downloads/") {
-            return .downloadsAndInstallers
-        } else if item.logicalSize >= 100 * 1024 * 1024 {
-            return .largeFiles
-        } else {
-            return .otherUserData
-        }
+        return ClassificationRules.shared.determineCategory(for: item)
     }
 }
 

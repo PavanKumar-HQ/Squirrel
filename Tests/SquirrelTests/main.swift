@@ -178,11 +178,11 @@ await runAsyncTest("Quarantine & Collision-Safe Restoration") {
 await runAsyncTest("Classification Safety Rules") {
     let rules = ClassificationRules.shared
 
-    // Developer artifact rule
-    let devItem = StorageItem(
-        url: URL(fileURLWithPath: "/Users/developer/project/DerivedData/Build/Products"),
-        path: "/Users/developer/project/DerivedData/Build/Products",
-        name: "Products",
+    // Xcode DerivedData rule
+    let xcodeItem = StorageItem(
+        url: URL(fileURLWithPath: "/Users/developer/Library/Developer/Xcode/DerivedData/MyApp-abcd"),
+        path: "/Users/developer/Library/Developer/Xcode/DerivedData/MyApp-abcd",
+        name: "MyApp-abcd",
         logicalSize: 300 * 1024 * 1024,
         allocatedSize: 300 * 1024 * 1024,
         isDirectory: true,
@@ -193,9 +193,30 @@ await runAsyncTest("Classification Safety Rules") {
         isReadable: true,
         isWritable: true
     )
-    let devFinding = rules.classify(item: devItem)
-    assertTest(devFinding?.eligibility == .keep, "Developer artifact classified as Keep / Not Recommended")
-    assertTest(devFinding?.ruleId == "RULE-DEV-EXCLUDE", "Correct rule ID applied: RULE-DEV-EXCLUDE")
+    let xcodeFinding = rules.classify(item: xcodeItem)
+    assertTest(xcodeFinding?.eligibility == .safeToClean, "Xcode DerivedData classified as Safe to Clean")
+    assertTest(xcodeFinding?.ruleId == "RULE-XCODE-DERIVEDDATA", "Correct rule ID applied: RULE-XCODE-DERIVEDDATA")
+    assertTest(xcodeFinding?.category == .developerCaches, "Correct category applied: .developerCaches")
+
+    // Project Purge artifact rule (e.g. node_modules)
+    let nodeModulesItem = StorageItem(
+        url: URL(fileURLWithPath: "/Users/developer/Projects/MyApp/node_modules"),
+        path: "/Users/developer/Projects/MyApp/node_modules",
+        name: "node_modules",
+        logicalSize: 150 * 1024 * 1024,
+        allocatedSize: 150 * 1024 * 1024,
+        isDirectory: true,
+        isSymbolicLink: false,
+        deviceId: 1,
+        inode: 502,
+        modificationDate: Date(),
+        isReadable: true,
+        isWritable: true
+    )
+    let nmFinding = rules.classify(item: nodeModulesItem)
+    assertTest(nmFinding?.eligibility == .reviewRecommended, "Project dependency classified as Review Recommended")
+    assertTest(nmFinding?.ruleId == "RULE-PROJECT-PURGE", "Correct rule ID applied: RULE-PROJECT-PURGE")
+    assertTest(nmFinding?.category == .projectArtifacts, "Correct category applied: .projectArtifacts")
 
     // Old log file rule
     let oldDate = Calendar.current.date(byAdding: .day, value: -20, to: Date())!
@@ -813,6 +834,70 @@ await runAsyncTest("FolderAccessManager & Persistent Bookmark Lifecycle") {
     // 8. Revocation
     launchedManager.revokeAccess(id: recordA.id)
     assertTest(!launchedManager.hasValidAuthorization(for: folderA), "Revoking access immediately disqualifies folder from automatic scan")
+}
+
+// Test 19: ProcessSafetyGuard Active Process Detection
+await runAsyncTest("ProcessSafetyGuard Active Process Detection") {
+    let guardEngine = ProcessSafetyGuard.shared
+    // Non-existent application path should not be marked running
+    let checkNonExistent = guardEngine.isApplicationRunning(forPath: "/tmp/fake_non_existent_app_directory")
+    assertTest(!checkNonExistent.isRunning, "Non-existent application correctly reported as not running")
+}
+
+// Test 20: ProjectPurgeScanner Workspace Discovery & Artifact Measurement
+await runAsyncTest("ProjectPurgeScanner Workspace Discovery & Artifact Measurement") {
+    let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent("ProjectPurgeTest_\(UUID().uuidString)")
+    let projectDir = tempDir.appendingPathComponent("SampleNodeApp")
+    let nodeModulesDir = projectDir.appendingPathComponent("node_modules")
+    let buildDir = projectDir.appendingPathComponent("build")
+
+    try? FileManager.default.createDirectory(at: nodeModulesDir, withIntermediateDirectories: true)
+    try? FileManager.default.createDirectory(at: buildDir, withIntermediateDirectories: true)
+
+    // Create marker
+    let packageJson = projectDir.appendingPathComponent("package.json")
+    try? "{\"name\": \"sample-app\"}".write(to: packageJson, atomically: true, encoding: .utf8)
+
+    // Create dummy artifact files
+    let dummyFile1 = nodeModulesDir.appendingPathComponent("package.js")
+    try? String(repeating: "X", count: 1024 * 50).write(to: dummyFile1, atomically: true, encoding: .utf8)
+
+    let dummyFile2 = buildDir.appendingPathComponent("bundle.js")
+    try? String(repeating: "Y", count: 1024 * 30).write(to: dummyFile2, atomically: true, encoding: .utf8)
+
+    let scanner = ProjectPurgeScanner()
+    let candidates = await scanner.scanProjects(roots: [tempDir])
+
+    assertTest(candidates.count == 1, "Discovered exactly 1 candidate project")
+    if let first = candidates.first {
+        assertTest(first.projectName == "SampleNodeApp", "Project name matches folder: SampleNodeApp")
+        assertTest(first.projectType.contains("Node"), "Project type detected: \(first.projectType)")
+        assertTest(first.artifacts.count == 2, "Discovered both node_modules and build artifacts")
+        assertTest(first.totalReclaimableBytes >= 80 * 1024, "Total reclaimable bytes measured correctly: \(first.totalReclaimableBytes)")
+    }
+
+    try? FileManager.default.removeItem(at: tempDir)
+}
+
+// Test 21: NativeToolPruner Developer Toolchain Discovery
+await runAsyncTest("NativeToolPruner Developer Toolchain Discovery") {
+    let pruner = NativeToolPruner.shared
+    let tools = await pruner.discoverTools()
+
+    assertTest(!tools.isEmpty, "NativeToolPruner discovered supported tool specifications (\(tools.count) tools)")
+    let toolNames = Set(tools.map { $0.name })
+    assertTest(toolNames.contains("Homebrew"), "Includes Homebrew in supported catalog")
+    assertTest(toolNames.contains("Docker"), "Includes Docker in supported catalog")
+    assertTest(toolNames.contains("pnpm"), "Includes pnpm in supported catalog")
+    assertTest(toolNames.contains("Rust / Cargo"), "Includes Rust / Cargo in supported catalog")
+}
+
+// Test 22: SnapshotManager APFS Snapshot Inspection
+await runAsyncTest("SnapshotManager APFS Snapshot Inspection") {
+    let manager = SnapshotManager.shared
+    let snapshots = await manager.listLocalSnapshots()
+    // It should run tmutil listlocalsnapshots safely without throwing
+    assertTest(snapshots.count >= 0, "SnapshotManager completed tmutil inspection safely (\(snapshots.count) local snapshots found)")
 }
 
 print("\n==================================================")

@@ -12,6 +12,12 @@ public enum SquirrelTheme {
         switch category {
         case .userCaches:
             return Color(red: 0.18, green: 0.64, blue: 0.74) // Refined Ocean Teal
+        case .developerCaches:
+            return Color(red: 0.22, green: 0.58, blue: 0.95) // Vibrant Electric Blue
+        case .projectArtifacts:
+            return Color(red: 0.95, green: 0.45, blue: 0.25) // Rust Coral
+        case .appContainers:
+            return Color(red: 0.35, green: 0.75, blue: 0.55) // Emerald Sage
         case .systemLogs:
             return Color(red: 0.42, green: 0.46, blue: 0.80) // Slate Indigo
         case .downloadsAndInstallers:
@@ -68,6 +74,49 @@ extension View {
     /// Elevated surface for sidebars and panels.
     public func elevatedCard(cornerRadius: CGFloat = 10) -> some View {
         self.modifier(SquirrelTheme.ElevatedCardModifier(cornerRadius: cornerRadius))
+    }
+}
+
+/// Standardized stat metric summary card for dashboards and utility panels.
+public struct StatMetricCard: View {
+    public let title: String
+    public let value: String
+    public let subtitle: String
+    public let iconName: String
+    public let tintColor: Color
+
+    public init(title: String, value: String, subtitle: String, iconName: String, tintColor: Color) {
+        self.title = title
+        self.value = value
+        self.subtitle = subtitle
+        self.iconName = iconName
+        self.tintColor = tintColor
+    }
+
+    public var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(tintColor.opacity(0.12))
+                    .frame(width: 36, height: 36)
+                Image(systemName: iconName)
+                    .font(.system(size: 16))
+                    .foregroundColor(tintColor)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Text(value)
+                    .font(.system(size: 15, weight: .bold))
+                Text(subtitle)
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary.opacity(0.8))
+            }
+            Spacer()
+        }
+        .padding(10)
+        .solidCard(cornerRadius: 8)
     }
 }
 

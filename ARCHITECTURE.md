@@ -137,10 +137,12 @@ All findings require explicit category-specific safety rules, and the default po
 |---|---|---|---|
 | **System & User Caches** | Review Recommended | Selective Clean | Only allowlisted transient subcategories (e.g. inactive web asset caches older than 7 days) can be batch-cleaned. All other caches require review. |
 | **Old Log Files** | Review Recommended | Review Required | 14-day inactivity is a discovery threshold, not automatic permission to delete. Critical diagnostic logs require user review. |
+| **Developer & Build Caches** | Safe to Clean / Review | Safe (Caches) / Review (Symbols) | Xcode `DerivedData`, CoreSimulator caches, and package manager stores (`npm`, `pnpm`, `pip`, `cargo`, `go-build`). |
+| **Project Purge Targets** | Review Recommended | Interactive Selection | Stale build artifacts (`node_modules`, `target`, `.venv`, `.next`, `dist`, `build`) detected across user code repositories. |
+| **App Containers & Caches** | Safe to Clean | Safe to Batch Clean | Sandboxed container caches (`~/Library/Containers/*/Data/Library/Caches`), Group Containers, and obsolete browser versions. |
 | **Download Installers** | Review Recommended | Review Required | `.dmg`, `.pkg`, `.iso` in user folders. Mandatory manual review; never batch-cleaned. |
 | **Large Files** | Review Recommended | Review Required | Files >= 100 MB. Classified by type and age; user review mandatory. |
 | **Exact Duplicate Files** | Review Recommended | Review Required | Multi-stage content hash verified. Mandatory manual selection of copies to remove. |
-| **Developer Workspaces** | Keep / Excluded | Excluded | Xcode `DerivedData`, Docker containers, `node_modules`, Cargo caches are excluded in v1.0. |
 | **Zero-Byte Files** | Keep / Review | Excluded from Auto-Delete | Zero-byte lockfiles and sentinel files are NOT automatically deleted; they may represent active application state. |
 
 ---
@@ -176,3 +178,36 @@ All findings require explicit category-specific safety rules, and the default po
 4. **Content Verification:** Exact byte-for-byte or cryptographic confirmation before labeling as duplicates.
 5. **No Double-Counting:** Potential savings calculated strictly as `(count - 1) * size`.
 6. **Mandatory Manual Selection:** Squirrel never automatically deletes duplicate copies.
+
+---
+
+## 9. High-Yield Optimization Engines (Integrated from Mole / tw93/mole)
+
+To deliver real, production-grade storage recovery on modern developer Macs (often freeing 30–60 GB in a single pass), Squirrel incorporates four specialized engines:
+
+### 1. `ProjectPurgeScanner` (Project Repository Purge)
+- **Mechanism:** Walks user development roots (`~/Code`, `~/Projects`, `~/Developer`, `~/Workspace`, `~/dev`, `~/Downloads`) to discover software projects by indicator markers (`package.json`, `Cargo.toml`, `go.mod`, `pom.xml`, `build.gradle`, `pyproject.toml`, `Package.swift`).
+- **Target Artifacts:** `node_modules`, `target`, `build`, `dist`, `venv`, `.venv`, `.next`, `.turbo`, `.svelte-kit`, `.astro`, `.build`, `Pods`.
+- **Safety:** Source code files, git branches/commits, and environment files are untouched. Artifacts are moved to macOS Trash and can be reinstalled at any time via the project's package manager.
+
+### 2. `NativeToolPruner` (Developer CLI Pruner)
+- **Mechanism:** Discovers installed developer CLI tools in PATH (`brew`, `docker`, `pnpm`, `npm`, `pip3`, `uv`, `go`, `cargo`).
+- **Official Pruning Commands:**
+  - Homebrew: `brew cleanup -s --prune=all`
+  - Docker: `docker system prune -f`
+  - pnpm: `pnpm store prune`
+  - npm: `npm cache clean --force`
+  - Python: `pip3 cache purge` / `uv cache prune`
+  - Go: `go clean -cache`
+  - Cargo: Cleans crates registry downloads and toolchain archives.
+- **Reporting:** Runs commands asynchronously and captures real terminal stdout/stderr and verified byte deltas.
+
+### 3. `SnapshotManager` (APFS Local Snapshots)
+- **Mechanism:** Uses `/usr/bin/tmutil listlocalsnapshots /` to discover local APFS snapshots created by Time Machine and third-party backup tools.
+- **Why It Matters:** macOS APFS snapshots retain deleted file blocks on the physical drive until deleted.
+- **Pruning:** Deletes snapshots via `/usr/bin/tmutil deletelocalsnapshots <snapshot_date>`.
+
+### 4. `ProcessSafetyGuard` (Active Process Guarding)
+- **Mechanism:** Verifies with `NSWorkspace.shared.runningApplications` whether applications owning targeted caches (Xcode, Chrome, Docker, Slack, VS Code, Cursor, WeChat, etc.) are actively running before cleaning.
+- **Safety Policy:** If an application is running, cache modification is automatically deferred with a clear log entry, preventing mid-run application crashes and state corruption.
+

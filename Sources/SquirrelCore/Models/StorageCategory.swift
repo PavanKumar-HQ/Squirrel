@@ -3,6 +3,9 @@ import Foundation
 /// Represents a distinct classification of scanned storage items.
 public enum StorageCategory: String, Codable, CaseIterable, Identifiable, Sendable {
     case userCaches = "User Caches"
+    case developerCaches = "Developer & Build Caches"
+    case projectArtifacts = "Project Purge Targets"
+    case appContainers = "App Containers & Caches"
     case systemLogs = "System & App Logs"
     case downloadsAndInstallers = "Downloads & Installers"
     case largeFiles = "Large Files"
@@ -16,6 +19,12 @@ public enum StorageCategory: String, Codable, CaseIterable, Identifiable, Sendab
         switch self {
         case .userCaches:
             return "Application cache files that can be regenerated automatically by applications when needed."
+        case .developerCaches:
+            return "Xcode DerivedData, simulator runtimes, package manager stores, and compiler build caches."
+        case .projectArtifacts:
+            return "Heavy project dependencies (node_modules, target, .venv, dist) that can be reinstalled anytime."
+        case .appContainers:
+            return "Sandboxed application container caches, group containers, and stale browser update versions."
         case .systemLogs:
             return "Diagnostic logs, crash reports, and system log archives older than standard retention windows."
         case .downloadsAndInstallers:
@@ -33,9 +42,9 @@ public enum StorageCategory: String, Codable, CaseIterable, Identifiable, Sendab
 
     public var isBatchCleanEligible: Bool {
         switch self {
-        case .userCaches, .systemLogs:
+        case .userCaches, .developerCaches, .appContainers, .systemLogs:
             return true
-        case .downloadsAndInstallers, .largeFiles, .duplicates, .appLeftovers, .otherUserData:
+        case .projectArtifacts, .downloadsAndInstallers, .largeFiles, .duplicates, .appLeftovers, .otherUserData:
             return false // Mandatory manual review
         }
     }
@@ -44,6 +53,12 @@ public enum StorageCategory: String, Codable, CaseIterable, Identifiable, Sendab
         switch self {
         case .userCaches:
             return "cylinder.split.1x2"
+        case .developerCaches:
+            return "hammer"
+        case .projectArtifacts:
+            return "shippingbox"
+        case .appContainers:
+            return "square.stack.3d.down.right"
         case .systemLogs:
             return "doc.plaintext"
         case .downloadsAndInstallers:
