@@ -212,15 +212,24 @@ public actor NativeToolPruner {
     }
 
     private func findExecutable(named name: String) -> String? {
-        let searchPaths = [
+        let home = FileManager.default.homeDirectoryForCurrentUser.path
+        var searchPaths = [
             "/opt/homebrew/bin",
             "/usr/local/bin",
             "/usr/bin",
             "/bin",
-            "\(FileManager.default.homeDirectoryForCurrentUser.path)/.cargo/bin"
+            "\(home)/.cargo/bin",
+            "\(home)/.local/bin",
+            "/opt/anaconda3/bin"
         ]
 
+        if let envPath = ProcessInfo.processInfo.environment["PATH"] {
+            let envDirs = envPath.components(separatedBy: ":")
+            searchPaths.insert(contentsOf: envDirs, at: 0)
+        }
+
         for dir in searchPaths {
+            guard !dir.isEmpty else { continue }
             let fullPath = "\(dir)/\(name)"
             if FileManager.default.isExecutableFile(atPath: fullPath) {
                 return fullPath
