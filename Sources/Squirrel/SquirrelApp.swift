@@ -1,8 +1,24 @@
 import SwiftUI
+import AppKit
 import SquirrelCore
+
+public final class AppDelegate: NSObject, NSApplicationDelegate {
+    public func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+            NSApp.windows.first?.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    public func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return true
+    }
+}
 
 @main
 public struct SquirrelApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @ObservedObject private var appState = AppState.shared
 
     public init() {}
