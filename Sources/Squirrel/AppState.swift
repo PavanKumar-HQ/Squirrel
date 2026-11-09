@@ -44,6 +44,20 @@ public enum NavigationSection: String, CaseIterable, Identifiable {
     }
 }
 
+public struct CleanResultFeedback: Sendable, Equatable {
+    public let reclaimedBytes: Int64
+    public let itemsCleanedCount: Int
+    public let itemsSkippedCount: Int
+    public let skippedReasons: [String]
+
+    public init(reclaimedBytes: Int64, itemsCleanedCount: Int, itemsSkippedCount: Int, skippedReasons: [String] = []) {
+        self.reclaimedBytes = reclaimedBytes
+        self.itemsCleanedCount = itemsCleanedCount
+        self.itemsSkippedCount = itemsSkippedCount
+        self.skippedReasons = skippedReasons
+    }
+}
+
 public final class AppState: ObservableObject, @unchecked Sendable {
     public static let shared = AppState()
 
@@ -55,6 +69,8 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     @Published public var expandedHubCategories: Set<CleanGroupCategory> = [.developerTools, .systemData]
     @Published public var showHubConfirmClean: Bool = false
     @Published public var showCleanSafelyConfirm: Bool = false
+    @Published public var lastCleanResult: CleanResultFeedback? = nil
+    @Published public var showCleanResultBanner: Bool = false
     @Published public var showFindingConfirmSheet: Bool = false
     @Published public var showDuplicateConfirmSheet: Bool = false
     @Published public var selectedFindingFilterIndex: Int = 0
@@ -830,17 +846,48 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     }
 
     public func cleanSelectedHubItems() async {
+        let initialSpace = VolumeSpace.querySystemVolume()
         let selected = readyToCleanSummary.items.filter { $0.isSelected }
+        var cleanedCount = 0
+        var skippedCount = 0
+        var skippedReasons: [String] = []
+        let safetyGuard = ProcessSafetyGuard.shared
+
         for item in selected {
+            // Safety guard: protect running applications/CLI daemons
+            let runningCheck = safetyGuard.isApplicationRunning(forPath: item.path)
+            if runningCheck.isRunning, let appName = runningCheck.appName {
+                skippedCount += 1
+                skippedReasons.append("\(item.name) was skipped because \(appName) is actively running.")
+                continue
+            }
+
             if item.category == .systemData && item.name.starts(with: "APFS Snapshot:") {
-                _ = await snapshotManager.deleteSnapshot(LocalSnapshot(name: item.path, dateString: "", isTimeMachine: true))
+                let success = await snapshotManager.deleteSnapshot(LocalSnapshot(name: item.name, dateString: item.path, isTimeMachine: true))
+                if success {
+                    cleanedCount += 1
+                }
             } else {
                 let url = URL(fileURLWithPath: item.path)
                 var resultingURL: NSURL?
-                _ = try? FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
+                if (try? FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)) != nil {
+                    cleanedCount += 1
+                }
             }
         }
+
+        let postSpace = VolumeSpace.querySystemVolume()
+        let verifiedReclaimed = max(0, postSpace.availableCapacity - initialSpace.availableCapacity)
+        let feedback = CleanResultFeedback(
+            reclaimedBytes: verifiedReclaimed > 0 ? verifiedReclaimed : selected.reduce(0) { $0 + $1.sizeBytes },
+            itemsCleanedCount: cleanedCount,
+            itemsSkippedCount: skippedCount,
+            skippedReasons: skippedReasons
+        )
+
         await MainActor.run {
+            self.lastCleanResult = feedback
+            self.showCleanResultBanner = true
             self.performHubAudit()
             self.refreshVolumeMetrics()
         }

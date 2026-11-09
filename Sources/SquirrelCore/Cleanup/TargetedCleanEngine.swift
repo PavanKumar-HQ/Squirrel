@@ -41,6 +41,8 @@ public struct CleanableItem: Identifiable, Sendable, Equatable {
     public let category: CleanGroupCategory
     public let detail: String
     public var isSelected: Bool
+    public let isProcessRunning: Bool
+    public let activeProcessName: String?
 
     public init(
         id: String = UUID().uuidString,
@@ -49,7 +51,9 @@ public struct CleanableItem: Identifiable, Sendable, Equatable {
         sizeBytes: Int64,
         category: CleanGroupCategory,
         detail: String,
-        isSelected: Bool = true
+        isSelected: Bool = true,
+        isProcessRunning: Bool = false,
+        activeProcessName: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -57,16 +61,21 @@ public struct CleanableItem: Identifiable, Sendable, Equatable {
         self.sizeBytes = sizeBytes
         self.category = category
         self.detail = detail
-        self.isSelected = isSelected
+        // If an active process owns this directory, deselect by default for safety
+        self.isSelected = isProcessRunning ? false : isSelected
+        self.isProcessRunning = isProcessRunning
+        self.activeProcessName = activeProcessName
     }
 }
 
 /// Aggregate summary of all 4 categories ready for one-click clean.
 public struct ReadyToCleanSummary: Sendable {
     public var items: [CleanableItem] = []
+    public var hasFullDiskAccess: Bool = true
 
-    public init(items: [CleanableItem] = []) {
+    public init(items: [CleanableItem] = [], hasFullDiskAccess: Bool = true) {
         self.items = items
+        self.hasFullDiskAccess = hasFullDiskAccess
     }
 
     public var totalCleanableBytes: Int64 {
@@ -97,23 +106,31 @@ public actor TargetedCleanEngine {
 
     public init() {}
 
+    /// Checks if macOS Full Disk Access is granted to the running application.
+    public static var checkFullDiskAccess: Bool {
+        let safariPath = (NSHomeDirectory() as NSString).appendingPathComponent("Library/Safari")
+        return FileManager.default.isReadableFile(atPath: safariPath)
+    }
+
     public func performTargetedAudit(
         progressHandler: (@Sendable (String) -> Void)? = nil
     ) async -> ReadyToCleanSummary {
         var cleanableItems: [CleanableItem] = []
         let fileManager = FileManager.default
         let home = fileManager.homeDirectoryForCurrentUser
+        let safetyGuard = ProcessSafetyGuard.shared
+        let hasFDA = Self.checkFullDiskAccess
 
         // 1. DEVELOPER TOOLS (High Yield: Xcode, SwiftPM, Rust, Node, Web, Python)
         progressHandler?("Checking developer build caches...")
 
-        // Known developer cache paths
         let devCachePaths: [(name: String, relPath: String, desc: String)] = [
             ("Xcode DerivedData", "Library/Developer/Xcode/DerivedData", "Regenerable Xcode build artifacts and indexing data"),
             ("Xcode Caches", "Library/Caches/com.apple.dt.Xcode", "Xcode documentation and compiler caches"),
             ("SwiftPM Cache", "Library/Caches/org.swift.swiftpm", "Swift Package Manager checkouts and cache"),
             ("CoreSimulator Caches", "Library/Developer/CoreSimulator/Caches", "iOS Simulator runtime caches"),
             ("npm Cache", ".npm/_cacache", "Node.js npm package download cache"),
+            ("pnpm Store", ".local/share/pnpm/store", "pnpm global content-addressable package store"),
             ("Cargo Registry Cache", ".cargo/registry/cache", "Rust Cargo crate source archives"),
             ("Cargo Git DB", ".cargo/git/db", "Rust Cargo git repositories cache"),
             ("Gradle Caches", ".gradle/caches", "Java / Android Gradle dependency cache"),
@@ -128,12 +145,16 @@ public actor TargetedCleanEngine {
             if fileManager.fileExists(atPath: fullURL.path) {
                 let size = ProjectPurgeScanner.fastDirectorySize(at: fullURL.path)
                 if size > 1024 * 1024 { // Only include if > 1 MB
+                    let procCheck = safetyGuard.isApplicationRunning(forPath: fullURL.path)
                     cleanableItems.append(CleanableItem(
                         name: entry.name,
                         path: fullURL.path,
                         sizeBytes: size,
                         category: .developerTools,
-                        detail: entry.desc
+                        detail: entry.desc,
+                        isSelected: !procCheck.isRunning,
+                        isProcessRunning: procCheck.isRunning,
+                        activeProcessName: procCheck.appName
                     ))
                 }
             }
@@ -144,17 +165,21 @@ public actor TargetedCleanEngine {
         let discoveredProjects = await ProjectPurgeScanner.shared.scanProjects(roots: projectRoots)
         for proj in discoveredProjects {
             for artifact in proj.artifacts {
+                let procCheck = safetyGuard.isApplicationRunning(forPath: artifact.path)
                 cleanableItems.append(CleanableItem(
                     name: "\(proj.projectName) (\(artifact.name))",
                     path: artifact.path,
                     sizeBytes: artifact.sizeBytes,
                     category: .developerTools,
-                    detail: "\(proj.projectType) regenerable build artifact in \(proj.projectName)"
+                    detail: "\(proj.projectType) regenerable build artifact in \(proj.projectName)",
+                    isSelected: !procCheck.isRunning,
+                    isProcessRunning: procCheck.isRunning,
+                    activeProcessName: procCheck.appName
                 ))
             }
         }
 
-        // 2. SYSTEM DATA (APFS Time Machine Snapshots & System Logs)
+        // 2. SYSTEM DATA (APFS Time Machine Snapshots & Diagnostic Reports)
         progressHandler?("Checking system data & local snapshots...")
 
         let snapshots = await SnapshotManager.shared.listLocalSnapshots()
@@ -162,7 +187,7 @@ public actor TargetedCleanEngine {
             let snapSize: Int64 = 500 * 1024 * 1024 // Estimated ~500 MB baseline per snapshot
             cleanableItems.append(CleanableItem(
                 name: "APFS Snapshot: \(snap.name)",
-                path: snap.name,
+                path: snap.dateString, // store the dateString for deletion in SnapshotManager
                 sizeBytes: snapSize,
                 category: .systemData,
                 detail: "Local Time Machine snapshot created on \(snap.dateString)"
@@ -184,29 +209,44 @@ public actor TargetedCleanEngine {
             }
         }
 
-        // 3. APP CACHES & LOGS
+        // 3. APP CACHES & LOGS (Targeted High-Yield App Caches)
         progressHandler?("Checking application caches...")
 
-        let userCaches = home.appendingPathComponent("Library/Caches")
-        if let cacheDirs = try? fileManager.contentsOfDirectory(at: userCaches, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
-            for cacheDir in cacheDirs {
-                let name = cacheDir.lastPathComponent
-                // Skip developer caches already categorized
-                if name == "com.apple.dt.Xcode" || name == "org.swift.swiftpm" || name == "CocoaPods" || name == "Homebrew" {
-                    continue
-                }
-                var isDir: ObjCBool = false
-                if fileManager.fileExists(atPath: cacheDir.path, isDirectory: &isDir), isDir.boolValue {
-                    let size = ProjectPurgeScanner.fastDirectorySize(at: cacheDir.path)
-                    if size > 50 * 1024 * 1024 { // Only surface significant caches (> 50 MB)
-                        cleanableItems.append(CleanableItem(
-                            name: name,
-                            path: cacheDir.path,
-                            sizeBytes: size,
-                            category: .appCaches,
-                            detail: "User application cache for \(name)"
-                        ))
-                    }
+        let curatedAppCaches: [(name: String, relPath: String, desc: String)] = [
+            ("Google Chrome Cache", "Library/Caches/Google/Chrome", "Chrome browser page and media cache"),
+            ("Brave Browser Cache", "Library/Caches/BraveSoftware/Brave-Browser", "Brave browser page and component cache"),
+            ("Microsoft Edge Cache", "Library/Caches/Microsoft Edge", "Edge browser cache"),
+            ("Safari Cache", "Library/Caches/com.apple.Safari", "Safari web cache and website previews"),
+            ("Arc Browser Cache", "Library/Caches/company.thebrowser.Browser", "Arc browser cache and tabs data"),
+            ("Firefox Cache", "Library/Caches/Firefox", "Firefox web cache and profiles"),
+            ("Slack Cache", "Library/Caches/com.tinyspeck.slackmacgap", "Slack team messages and media cache"),
+            ("Discord Cache", "Library/Caches/com.hnc.Discord", "Discord attachments and voice/video cache"),
+            ("Spotify Cache", "Library/Caches/com.spotify.client", "Spotify streamed track cache"),
+            ("VS Code Caches", "Library/Caches/com.microsoft.VSCode", "VS Code extensions and editor cache"),
+            ("Cursor Caches", "Library/Caches/com.todesktop.230313mzl4w4u92", "Cursor AI editor workspace cache"),
+            ("Figma Cache", "Library/Caches/com.figma.Desktop", "Figma design canvas local cache"),
+            ("Postman Cache", "Library/Caches/com.postmanlabs.mac", "Postman API request and response cache"),
+            ("Telegram Cache", "Library/Caches/ru.keepcoder.Telegram", "Telegram media and sticker cache"),
+            ("WhatsApp Cache", "Library/Caches/net.whatsapp.WhatsApp", "WhatsApp chat media and preview cache"),
+            ("QuickLook Thumbnails", "Library/Caches/com.apple.QuickLook.thumbnailcache", "System file preview thumbnail cache")
+        ]
+
+        for entry in curatedAppCaches {
+            let fullURL = home.appendingPathComponent(entry.relPath)
+            if fileManager.fileExists(atPath: fullURL.path) {
+                let size = ProjectPurgeScanner.fastDirectorySize(at: fullURL.path)
+                if size > 1024 * 1024 { // Only include if > 1 MB
+                    let procCheck = safetyGuard.isApplicationRunning(forPath: fullURL.path)
+                    cleanableItems.append(CleanableItem(
+                        name: entry.name,
+                        path: fullURL.path,
+                        sizeBytes: size,
+                        category: .appCaches,
+                        detail: entry.desc,
+                        isSelected: !procCheck.isRunning,
+                        isProcessRunning: procCheck.isRunning,
+                        activeProcessName: procCheck.appName
+                    ))
                 }
             }
         }
@@ -215,7 +255,7 @@ public actor TargetedCleanEngine {
         let userLogs = home.appendingPathComponent("Library/Logs")
         if fileManager.fileExists(atPath: userLogs.path) {
             let size = ProjectPurgeScanner.fastDirectorySize(at: userLogs.path)
-            if size > 10 * 1024 * 1024 {
+            if size > 5 * 1024 * 1024 {
                 cleanableItems.append(CleanableItem(
                     name: "User Diagnostic Logs",
                     path: userLogs.path,
@@ -241,6 +281,6 @@ public actor TargetedCleanEngine {
         }
 
         progressHandler?("Audit complete.")
-        return ReadyToCleanSummary(items: cleanableItems)
+        return ReadyToCleanSummary(items: cleanableItems, hasFullDiskAccess: hasFDA)
     }
 }

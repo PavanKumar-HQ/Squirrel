@@ -900,6 +900,47 @@ await runAsyncTest("SnapshotManager APFS Snapshot Inspection") {
     assertTest(snapshots.count >= 0, "SnapshotManager completed tmutil inspection safely (\(snapshots.count) local snapshots found)")
 }
 
+// Test 23: SafeProcessRunner Execution & Timeout Watchdog
+await runAsyncTest("SafeProcessRunner Execution & Timeout Watchdog") {
+    // 1. Successful execution with stdout capture
+    let echoResult = await SafeProcessRunner.run(
+        executableURL: URL(fileURLWithPath: "/bin/echo"),
+        arguments: ["Squirrel Safe Process Engine"]
+    )
+    assertTest(echoResult.isSuccess, "echo executed successfully with exit code 0")
+    assertTest(echoResult.stdout.contains("Squirrel Safe Process Engine"), "SafeProcessRunner captured stdout stream correctly")
+    assertTest(!echoResult.didTimeout, "Normal command did not trigger timeout")
+
+    // 2. Timeout enforcement test
+    let timeoutResult = await SafeProcessRunner.run(
+        executableURL: URL(fileURLWithPath: "/bin/sleep"),
+        arguments: ["10"],
+        timeoutSeconds: 0.2
+    )
+    assertTest(timeoutResult.didTimeout, "Watchdog timeout correctly triggered for long-running process")
+}
+
+// Test 24: ProcessSafetyGuard Kernel Process Table Inspection
+await runAsyncTest("ProcessSafetyGuard Kernel Process Table Inspection") {
+    let guardEngine = ProcessSafetyGuard.shared
+    let darwinProcs = guardEngine.runningDarwinProcessNames()
+    assertTest(!darwinProcs.isEmpty, "Darwin kernel sysctl returned active process table (\(darwinProcs.count) processes)")
+    // The current test runner process or system daemons like launchd/kernel_task should be present
+    assertTest(darwinProcs.contains("launchd") || darwinProcs.contains("squirreltests") || darwinProcs.contains("swift"), "Kernel process table contains system or runner processes")
+}
+
+// Test 25: TargetedCleanEngine 4-Category Audit Efficiency
+await runAsyncTest("TargetedCleanEngine 4-Category Audit Efficiency") {
+    let engine = TargetedCleanEngine.shared
+    let start = Date()
+    let summary = await engine.performTargetedAudit()
+    let duration = Date().timeIntervalSince(start)
+
+    assertTest(duration < 5.0, "Targeted audit completed within 5 seconds (took \(String(format: "%.2f", duration))s)")
+    assertTest(!summary.items.isEmpty, "Targeted audit discovered cleanable developer/cache items (\(summary.items.count) items found)")
+    assertTest(summary.totalAvailableBytes > 0, "Cleanable bytes discovered: \(ByteCountFormatter.string(fromByteCount: summary.totalAvailableBytes, countStyle: .file))")
+}
+
 print("\n==================================================")
 print("  Test Results: \(passedCount) Passed, \(failedCount) Failed")
 print("==================================================")

@@ -16,7 +16,12 @@ public struct ReadyToCleanView: View {
         VStack(spacing: 0) {
             // Main Scrollable Content
             ScrollView {
-                VStack(alignment: .leading, spacing: 22) {
+                VStack(alignment: .leading, spacing: 20) {
+                    // Feedback Banner if clean recently finished
+                    if appState.showCleanResultBanner, let result = appState.lastCleanResult {
+                        cleanupFeedbackBanner(result)
+                    }
+
                     // Header Section
                     headerSection
 
@@ -53,6 +58,50 @@ public struct ReadyToCleanView: View {
                 secondaryButton: .cancel()
             )
         }
+    }
+
+    // MARK: - Cleanup Feedback Banner
+    private func cleanupFeedbackBanner(_ result: CleanResultFeedback) -> some View {
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 18))
+                .foregroundColor(.green)
+
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Cleaned \(formatted(result.reclaimedBytes)) successfully!")
+                    .font(.system(size: 13, weight: .bold))
+                    .foregroundColor(.primary)
+
+                Text("\(result.itemsCleanedCount) items removed.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+
+                if result.itemsSkippedCount > 0 {
+                    Text("\(result.itemsSkippedCount) items deferred because their application or CLI process is actively running.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.orange)
+                        .padding(.top, 2)
+                }
+            }
+
+            Spacer()
+
+            Button {
+                appState.showCleanResultBanner = false
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(.secondary)
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(14)
+        .background(Color.green.opacity(0.08))
+        .cornerRadius(10)
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(Color.green.opacity(0.2), lineWidth: 1)
+        )
     }
 
     // MARK: - Header
@@ -98,6 +147,23 @@ public struct ReadyToCleanView: View {
 
                 Text("\(availableStr) free after")
                     .foregroundColor(.secondary)
+
+                if !summary.hasFullDiskAccess {
+                    Text("·")
+                        .foregroundColor(.secondary)
+
+                    Text("Some caches were skipped")
+                        .foregroundColor(.secondary)
+
+                    Button("Enable Disk Access") {
+                        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(SquirrelTheme.brandWarm)
+                    .underline()
+                }
             }
             .font(.system(size: 13))
         }
@@ -200,9 +266,26 @@ public struct ReadyToCleanView: View {
             .buttonStyle(.plain)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.name)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.primary)
+                HStack(spacing: 6) {
+                    Text(item.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(.primary)
+
+                    if item.isProcessRunning {
+                        HStack(spacing: 3) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .font(.system(size: 9))
+                                .foregroundColor(.orange)
+                            Text(item.activeProcessName ?? "Running")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(.orange)
+                        }
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1.5)
+                        .background(Color.orange.opacity(0.12))
+                        .cornerRadius(4)
+                    }
+                }
 
                 Text(item.path)
                     .font(.system(size: 10, design: .monospaced))

@@ -22,74 +22,58 @@ public actor SnapshotManager {
 
     /// Discovers local APFS snapshots pinning storage on the root mount.
     public func listLocalSnapshots() async -> [LocalSnapshot] {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/tmutil")
-        process.arguments = ["listlocalsnapshots", "/"]
+        let result = await SafeProcessRunner.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/tmutil"),
+            arguments: ["listlocalsnapshots", "/"],
+            timeoutSeconds: 5.0
+        )
 
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            let output = String(data: data, encoding: .utf8) ?? ""
-
-            var snapshots: [LocalSnapshot] = []
-            let lines = output.components(separatedBy: .newlines)
-
-            for line in lines {
-                let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
-                guard !trimmed.isEmpty else { continue }
-
-                // tmutil outputs lines like:
-                // com.apple.TimeMachine.2024-05-10-142030.local
-                // Snapshots for volume /:
-                if trimmed.contains("com.apple.TimeMachine.") {
-                    let parts = trimmed.components(separatedBy: "com.apple.TimeMachine.")
-                    if parts.count > 1 {
-                        let datePart = parts[1].replacingOccurrences(of: ".local", with: "")
-                        snapshots.append(LocalSnapshot(
-                            name: trimmed,
-                            dateString: datePart,
-                            isTimeMachine: true
-                        ))
-                    }
-                } else if trimmed.contains("com.") || trimmed.contains(".") {
-                    // Third-party snapshots (Carbon Copy Cloner, Synology, etc.)
-                    snapshots.append(LocalSnapshot(
-                        name: trimmed,
-                        dateString: "APFS Snapshot",
-                        isTimeMachine: false
-                    ))
-                }
-            }
-
-            return snapshots
-        } catch {
+        guard result.isSuccess else {
             return []
         }
+
+        var snapshots: [LocalSnapshot] = []
+        let lines = result.stdout.components(separatedBy: .newlines)
+
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+
+            // tmutil outputs lines like:
+            // com.apple.TimeMachine.2024-05-10-142030.local
+            // Snapshots for volume /:
+            if trimmed.contains("com.apple.TimeMachine.") {
+                let parts = trimmed.components(separatedBy: "com.apple.TimeMachine.")
+                if parts.count > 1 {
+                    let datePart = parts[1].replacingOccurrences(of: ".local", with: "")
+                    snapshots.append(LocalSnapshot(
+                        name: trimmed,
+                        dateString: datePart,
+                        isTimeMachine: true
+                    ))
+                }
+            } else if trimmed.contains("com.") || trimmed.contains(".") {
+                // Third-party snapshots (Carbon Copy Cloner, Synology, etc.)
+                let datePart = trimmed.components(separatedBy: ".").last ?? trimmed
+                snapshots.append(LocalSnapshot(
+                    name: trimmed,
+                    dateString: datePart,
+                    isTimeMachine: false
+                ))
+            }
+        }
+
+        return snapshots
     }
 
     /// Deletes a specific snapshot by date string using tmutil.
     public func deleteSnapshot(_ snapshot: LocalSnapshot) async -> Bool {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/tmutil")
-        process.arguments = ["deletelocalsnapshots", snapshot.dateString]
-
-        let pipe = Pipe()
-        process.standardOutput = pipe
-        process.standardError = pipe
-
-        do {
-            try process.run()
-            process.waitUntilExit()
-            return process.terminationStatus == 0
-        } catch {
-            return false
-        }
+        guard !snapshot.dateString.isEmpty else { return false }
+        let result = await SafeProcessRunner.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/tmutil"),
+            arguments: ["deletelocalsnapshots", snapshot.dateString],
+            timeoutSeconds: 10.0
+        )
+        return result.isSuccess
     }
 }
-

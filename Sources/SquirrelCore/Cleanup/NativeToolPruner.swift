@@ -54,7 +54,7 @@ public actor NativeToolPruner {
 
     public init() {}
 
-    /// Discovers all supported tools, checking presence on disk and measuring cache sizes.
+    /// Discovers all supported tools, checking presence on disk and measuring cache sizes via kernel du.
     public func discoverTools() async -> [SupportedTool] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
 
@@ -125,7 +125,9 @@ public actor NativeToolPruner {
 
             var totalCacheSize: Int64 = 0
             for cPath in spec.caches {
-                totalCacheSize += calculatePathSize(cPath)
+                if FileManager.default.fileExists(atPath: cPath) {
+                    totalCacheSize += ProjectPurgeScanner.fastDirectorySize(at: cPath)
+                }
             }
 
             discovered.append(SupportedTool(
@@ -143,60 +145,49 @@ public actor NativeToolPruner {
         return discovered
     }
 
-    /// Executes the native tool prune command or safely clears cache paths.
+    /// Executes the native tool prune command or safely clears cache paths using SafeProcessRunner.
     public func pruneTool(_ tool: SupportedTool) async -> ToolPruneResult {
-        let sizeBefore = tool.cachePaths.reduce(0) { $0 + calculatePathSize($1) }
+        let sizeBefore = tool.cachePaths.reduce(0) { sum, path in
+            FileManager.default.fileExists(atPath: path) ? sum + ProjectPurgeScanner.fastDirectorySize(at: path) : sum
+        }
 
         if let execPath = tool.executablePath, !tool.pruneCommandArgs.isEmpty {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: execPath)
-            process.arguments = tool.pruneCommandArgs
-
-            // Set clean environment
             var env = ProcessInfo.processInfo.environment
             env["LC_ALL"] = "C"
-            process.environment = env
 
-            let pipe = Pipe()
-            process.standardOutput = pipe
-            process.standardError = pipe
+            let result = await SafeProcessRunner.run(
+                executableURL: URL(fileURLWithPath: execPath),
+                arguments: tool.pruneCommandArgs,
+                timeoutSeconds: 20.0,
+                environment: env
+            )
 
-            do {
-                try process.run()
-                process.waitUntilExit()
-
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let outputStr = String(data: data, encoding: .utf8) ?? ""
-
-                let sizeAfter = tool.cachePaths.reduce(0) { $0 + calculatePathSize($1) }
-                let reclaimed = max(0, sizeBefore - sizeAfter)
-
-                return ToolPruneResult(
-                    toolName: tool.name,
-                    succeeded: process.terminationStatus == 0,
-                    output: outputStr,
-                    bytesReclaimed: reclaimed > 0 ? reclaimed : sizeBefore
-                )
-            } catch {
-                return ToolPruneResult(
-                    toolName: tool.name,
-                    succeeded: false,
-                    output: "Execution failed: \(error.localizedDescription)",
-                    bytesReclaimed: 0
-                )
+            let sizeAfter = tool.cachePaths.reduce(0) { sum, path in
+                FileManager.default.fileExists(atPath: path) ? sum + ProjectPurgeScanner.fastDirectorySize(at: path) : sum
             }
+            let reclaimed = max(0, sizeBefore - sizeAfter)
+
+            return ToolPruneResult(
+                toolName: tool.name,
+                succeeded: result.isSuccess,
+                output: result.stdout.isEmpty ? result.stderr : result.stdout,
+                bytesReclaimed: reclaimed > 0 ? reclaimed : sizeBefore
+            )
         } else {
-            // For tools without CLI prune (like Cargo registry cache), safely clean directory contents
+            // Direct cache purge via trash for tools without a prune subcommand (e.g. Cargo registry cache)
             var cleanedBytes: Int64 = 0
             let fileManager = FileManager.default
 
             for cPath in tool.cachePaths {
                 let url = URL(fileURLWithPath: cPath)
-                if let items = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) {
-                    for item in items {
-                        let itemSize = calculatePathSize(item.path)
-                        if (try? fileManager.removeItem(at: item)) != nil {
-                            cleanedBytes += itemSize
+                if fileManager.fileExists(atPath: cPath) {
+                    let dirSize = ProjectPurgeScanner.fastDirectorySize(at: cPath)
+                    if let contents = try? fileManager.contentsOfDirectory(at: url, includingPropertiesForKeys: nil) {
+                        for item in contents {
+                            var resultingURL: NSURL?
+                            if (try? fileManager.trashItem(at: item, resultingItemURL: &resultingURL)) != nil {
+                                cleanedBytes += dirSize / Int64(max(1, contents.count))
+                            }
                         }
                     }
                 }
@@ -237,32 +228,4 @@ public actor NativeToolPruner {
         }
         return nil
     }
-
-    private func calculatePathSize(_ path: String) -> Int64 {
-        let fileManager = FileManager.default
-        let url = URL(fileURLWithPath: path)
-        guard fileManager.fileExists(atPath: path) else { return 0 }
-
-        var isDir: ObjCBool = false
-        fileManager.fileExists(atPath: path, isDirectory: &isDir)
-        if !isDir.boolValue {
-            let attr = try? fileManager.attributesOfItem(atPath: path)
-            return (attr?[.size] as? Int64) ?? 0
-        }
-
-        guard let enumerator = fileManager.enumerator(
-            at: url,
-            includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileSizeKey],
-            options: []
-        ) else { return 0 }
-
-        var totalSize: Int64 = 0
-        for case let fileURL as URL in enumerator {
-            if let resourceValues = try? fileURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileSizeKey]) {
-                totalSize += Int64(resourceValues.totalFileAllocatedSize ?? resourceValues.fileSize ?? 0)
-            }
-        }
-        return totalSize
-    }
 }
-
