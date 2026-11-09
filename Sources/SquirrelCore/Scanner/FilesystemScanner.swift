@@ -333,6 +333,10 @@ public actor FilesystemScanner {
     }
 
     public static func calculateDirectorySizes(at url: URL) -> (logical: Int64, allocated: Int64) {
+        let fastSize = ProjectPurgeScanner.fastDirectorySize(at: url.path)
+        if fastSize > 0 {
+            return (fastSize, fastSize)
+        }
         guard let enumerator = FileManager.default.enumerator(
             at: url,
             includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileSizeKey],

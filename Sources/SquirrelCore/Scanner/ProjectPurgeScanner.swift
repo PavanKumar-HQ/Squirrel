@@ -152,11 +152,25 @@ public actor ProjectPurgeScanner {
         }
 
         var visitedProjectDirs = Set<String>()
+        var itemsVisited = 0
 
         while let fileURL = enumerator.nextObject() as? URL {
             guard !isCancelled else { break }
 
+            itemsVisited += 1
+            if itemsVisited % 50 == 0 {
+                await Task.yield()
+            }
+
             let fileName = fileURL.lastPathComponent
+
+            // CRITICAL (Mole efficiency principle):
+            // NEVER traverse into artifact or dependency directories when discovering project indicators.
+            // This prevents traversing tens of thousands of package.json files inside node_modules!
+            if Self.targetArtifactNames.contains(fileName) || fileName == "Pods" || fileName == "vendor" {
+                enumerator.skipDescendants()
+                continue
+            }
 
             // Check if this file is a project indicator
             if let projectType = Self.projectIndicators[fileName] {
@@ -180,11 +194,6 @@ public actor ProjectPurgeScanner {
                     }
                 }
             }
-
-            // Do not recurse deeply into recognized artifacts
-            if Self.targetArtifactNames.contains(fileName) {
-                enumerator.skipDescendants()
-            }
         }
 
         return foundProjects
@@ -199,7 +208,7 @@ public actor ProjectPurgeScanner {
             var isDir: ObjCBool = false
 
             if fileManager.fileExists(atPath: targetURL.path, isDirectory: &isDir), isDir.boolValue {
-                let size = calculateDirectorySize(targetURL)
+                let size = Self.fastDirectorySize(at: targetURL.path)
                 if size > 0 {
                     let modDate = (try? fileManager.attributesOfItem(atPath: targetURL.path)[.modificationDate]) as? Date
                     artifacts.append(ProjectArtifact(
@@ -215,8 +224,30 @@ public actor ProjectPurgeScanner {
         return artifacts
     }
 
-    private func calculateDirectorySize(_ url: URL) -> Int64 {
+    public static func fastDirectorySize(at path: String) -> Int64 {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/du")
+        process.arguments = ["-sk", path]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        process.standardError = Pipe()
+        do {
+            try process.run()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            process.waitUntilExit()
+            if process.terminationStatus == 0,
+               let output = String(data: data, encoding: .utf8),
+               let firstWord = output.split(separator: "\t").first,
+               let kb = Int64(firstWord.trimmingCharacters(in: .whitespacesAndNewlines)) {
+                return kb * 1024
+            }
+        } catch {
+            // Fall back below
+        }
+
+        // Fallback for sandboxed or test environments
         let fileManager = FileManager.default
+        let url = URL(fileURLWithPath: path)
         guard let enumerator = fileManager.enumerator(
             at: url,
             includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileSizeKey],
