@@ -158,10 +158,6 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         refreshFolderAccess()
         refreshTools()
         refreshSnapshots()
-
-        // Automatically start scanning on launch so user immediately sees real reclaimable space
-        startScan()
-        scanProjects()
     }
 
     public func refreshFolderAccess() {
