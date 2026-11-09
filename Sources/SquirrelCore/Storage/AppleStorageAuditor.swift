@@ -146,8 +146,8 @@ public struct AppleStorageAuditor {
             proc.standardOutput = p
             proc.standardError = Pipe()
             guard (try? proc.run()) != nil else { return 0 }
-            proc.waitUntilExit()
             let out = p.fileHandleForReading.readDataToEndOfFile()
+            proc.waitUntilExit()
             if let str = String(data: out, encoding: .utf8),
                let first = str.split(separator: "\t").first,
                let kb = Int64(first.trimmingCharacters(in: .whitespacesAndNewlines)) {
