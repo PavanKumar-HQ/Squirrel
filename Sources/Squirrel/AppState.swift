@@ -11,6 +11,7 @@ public enum ScanStatus: String, Sendable {
 }
 
 public enum NavigationSection: String, CaseIterable, Identifiable {
+    case readyToClean = "Ready to Clean"
     case dashboard = "Dashboard"
     case findings = "Findings"
     case treemap = "Storage Treemap"
@@ -27,6 +28,7 @@ public enum NavigationSection: String, CaseIterable, Identifiable {
 
     public var iconName: String {
         switch self {
+        case .readyToClean: return "sparkles"
         case .dashboard: return "gauge.with.needle"
         case .findings: return "checklist"
         case .treemap: return "square.grid.3x3"
@@ -46,7 +48,12 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     public static let shared = AppState()
 
     // Navigation and UI state
-    @Published public var selectedSection: NavigationSection = .dashboard
+    @Published public var selectedSection: NavigationSection = .readyToClean
+    @Published public var readyToCleanSummary: ReadyToCleanSummary = ReadyToCleanSummary()
+    @Published public var isAuditingHub: Bool = false
+    @Published public var hubAuditProgress: String = ""
+    @Published public var expandedHubCategories: Set<CleanGroupCategory> = [.developerTools, .systemData]
+    @Published public var showHubConfirmClean: Bool = false
     @Published public var showCleanSafelyConfirm: Bool = false
     @Published public var showFindingConfirmSheet: Bool = false
     @Published public var showDuplicateConfirmSheet: Bool = false
@@ -798,6 +805,65 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         await MainActor.run {
             self.refreshSnapshots()
             self.refreshVolumeMetrics()
+        }
+    }
+
+    // MARK: - Ready to Clean (Mole Model Unified Hub)
+
+    public func performHubAudit() {
+        Task { @MainActor in
+            guard !self.isAuditingHub else { return }
+            self.isAuditingHub = true
+            self.hubAuditProgress = "Targeted audit across high-yield categories..."
+
+            let summary = await TargetedCleanEngine.shared.performTargetedAudit { prog in
+                Task { @MainActor in
+                    self.hubAuditProgress = prog
+                }
+            }
+
+            self.readyToCleanSummary = summary
+            self.isAuditingHub = false
+            self.hubAuditProgress = ""
+            self.refreshVolumeMetrics()
+        }
+    }
+
+    public func cleanSelectedHubItems() async {
+        let selected = readyToCleanSummary.items.filter { $0.isSelected }
+        for item in selected {
+            if item.category == .systemData && item.name.starts(with: "APFS Snapshot:") {
+                _ = await snapshotManager.deleteSnapshot(LocalSnapshot(name: item.path, dateString: "", isTimeMachine: true))
+            } else {
+                let url = URL(fileURLWithPath: item.path)
+                var resultingURL: NSURL?
+                _ = try? FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
+            }
+        }
+        await MainActor.run {
+            self.performHubAudit()
+            self.refreshVolumeMetrics()
+        }
+    }
+
+    public func toggleHubCategory(category: CleanGroupCategory, isSelected: Bool) {
+        for idx in readyToCleanSummary.items.indices {
+            if readyToCleanSummary.items[idx].category == category {
+                readyToCleanSummary.items[idx].isSelected = isSelected
+            }
+        }
+    }
+
+    public func selectAllHubItems(selected: Bool) {
+        for idx in readyToCleanSummary.items.indices {
+            readyToCleanSummary.items[idx].isSelected = selected
+        }
+    }
+
+    public func selectRecommendedHubItems() {
+        for idx in readyToCleanSummary.items.indices {
+            let cat = readyToCleanSummary.items[idx].category
+            readyToCleanSummary.items[idx].isSelected = (cat != .appLeftovers)
         }
     }
 

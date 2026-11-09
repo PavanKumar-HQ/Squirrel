@@ -50,11 +50,11 @@ public struct SquirrelApp: App {
                         .padding(.bottom, 6)
 
                     // Navigation List with Dynamic Badge Counts
-                    List(NavigationSection.allCases, selection: Binding(
+                    List(selection: Binding(
                         get: { appState.selectedSection },
                         set: { newSec in if let s = newSec { appState.selectedSection = s } }
-                    )) { section in
-                        NavigationLink(value: section) {
+                    )) {
+                        ForEach(NavigationSection.allCases) { section in
                             HStack {
                                 Label {
                                     Text(section.rawValue)
@@ -81,6 +81,7 @@ public struct SquirrelApp: App {
                                 }
                             }
                             .padding(.vertical, 2)
+                            .tag(section)
                         }
                     }
                     .listStyle(.sidebar)
@@ -124,6 +125,8 @@ public struct SquirrelApp: App {
             } detail: {
                 Group {
                     switch appState.selectedSection {
+                    case .readyToClean:
+                        ReadyToCleanView(appState: appState)
                     case .dashboard:
                         DashboardView(appState: appState)
                     case .findings:
@@ -232,7 +235,7 @@ public struct SquirrelApp: App {
             return appState.localSnapshots.isEmpty ? nil : appState.localSnapshots.count
         case .history:
             return appState.quarantineRecords.isEmpty ? nil : appState.quarantineRecords.count
-        case .dashboard, .treemap, .diagnostics:
+        case .dashboard, .treemap, .diagnostics, .readyToClean:
             return nil
         }
     }
