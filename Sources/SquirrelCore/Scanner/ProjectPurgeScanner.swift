@@ -78,19 +78,40 @@ public actor ProjectPurgeScanner {
 
     /// Discovers default search paths on the user's Mac
     public static func defaultProjectRoots() -> [URL] {
-        let home = FileManager.default.homeDirectoryForCurrentUser
+        let fileManager = FileManager.default
+        let home = fileManager.homeDirectoryForCurrentUser
         let candidateNames = [
             "Code", "Projects", "Developer", "Workspace", "Repos",
             "dev", "Development", "Downloads"
         ]
         var roots: [URL] = []
+        var visitedPaths = Set<String>()
+
         for name in candidateNames {
             let url = home.appendingPathComponent(name, isDirectory: true)
             var isDir: ObjCBool = false
-            if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+            if fileManager.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
                 roots.append(url)
+                visitedPaths.insert(url.path)
             }
         }
+
+        // Also discover any user project folder directly in $HOME (excluding standard macOS system folders)
+        let systemBases: Set<String> = [
+            "Library", "Applications", "Movies", "Music", "Pictures", "Public", "Desktop", "System"
+        ]
+        if let homeContents = try? fileManager.contentsOfDirectory(at: home, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles]) {
+            for itemURL in homeContents {
+                let base = itemURL.lastPathComponent
+                guard !systemBases.contains(base), !visitedPaths.contains(itemURL.path) else { continue }
+                var isDir: ObjCBool = false
+                if fileManager.fileExists(atPath: itemURL.path, isDirectory: &isDir), isDir.boolValue {
+                    roots.append(itemURL)
+                    visitedPaths.insert(itemURL.path)
+                }
+            }
+        }
+
         return roots
     }
 
