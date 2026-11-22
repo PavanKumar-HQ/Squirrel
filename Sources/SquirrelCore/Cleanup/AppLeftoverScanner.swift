@@ -18,16 +18,35 @@ public struct AppLeftoverItem: Identifiable, Sendable, Equatable {
 }
 
 /// Discovers files left behind by deleted applications in Application Support and Preferences.
+/// Incorporates production safety filters (mirroring Mole's app_protection.sh) to protect
+/// active editors, password managers, system services, and CLI tools.
 public actor AppLeftoverScanner {
     public static let shared = AppLeftoverScanner()
 
-    // Well-known Apple / macOS system services to preserve
-    private static let protectedSystemNames: Set<String> = [
+    /// System and critical developer application data names that MUST NEVER be flagged as leftovers.
+    private static let protectedAppSupportNames: Set<String> = [
+        // System Services & Apple Subsystems
         "AddressBook", "Animoji", "AskPermission", "CallHistoryDB", "CallHistoryTransactions",
         "Categories", "CloudDocs", "CoreParsec", "CrashReporter", "DifferentialPrivacy",
         "DiskImages", "FaceTime", "FileProvider", "IntelligenceFlow", "Knowledge", "Music",
         "OpenDirectory", "Quick Look", "Safari", "ScreenTime", "Spotlight", "SyncServices",
-        "WebKit", "accountsd", "cloudd", "containermanagerd", "identityservicesd", "passd"
+        "WebKit", "accountsd", "cloudd", "containermanagerd", "identityservicesd", "passd",
+        "MobileSync", "iCloud", "Dock", "NotificationCenter", "Keyboard", "QuickLook",
+        "com.apple.sharedfilelist", "com.apple.TCC", "com.apple.AddressBook",
+
+        // Developer Tools & Code Editors (often named differently from .app bundle)
+        "Code", "Visual Studio Code", "Cursor", "Antigravity", "Sublime Text", "Sublime Text 3",
+        "JetBrains", "IntelliJIdea", "PyCharm", "WebStorm", "CLion", "Fleet", "Xcode",
+        "Docker", "Docker Desktop", "Postman", "Insomnia", "Ollama", "Claude", "ChatGPT",
+        "pnpm", "pip", "uv", "cargo", "gnupg", "dconf", "mesa", "Homebrew",
+
+        // Security & Password Managers
+        "1Password", "1Password 7", "Bitwarden", "LastPass", "Dashlane", "KeePassXC",
+        "Keychains", "Security",
+
+        // Browsers & Messengers with non-bundle folder names
+        "Google", "BraveSoftware", "Microsoft", "Mozilla", "Firefox", "Arc",
+        "Discord", "Telegram", "Slack", "Signal", "WhatsApp", "Steam", "Spotify"
     ]
 
     public init() {}
@@ -44,7 +63,11 @@ public actor AppLeftoverScanner {
         let installedAppNames = Self.discoverInstalledAppNames()
 
         // 2. Inspect Application Support folders
-        guard let entries = try? fileManager.contentsOfDirectory(at: appSupport, includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey], options: [.skipsHiddenFiles]) else {
+        guard let entries = try? fileManager.contentsOfDirectory(
+            at: appSupport,
+            includingPropertiesForKeys: [.isDirectoryKey, .contentModificationDateKey],
+            options: [.skipsHiddenFiles]
+        ) else {
             return []
         }
 
@@ -53,19 +76,25 @@ public actor AppLeftoverScanner {
         for entry in entries {
             let name = entry.lastPathComponent
 
-            // Skip protected Apple system names
-            if Self.protectedSystemNames.contains(name) || name.hasPrefix("com.apple.") {
+            // Fast-path safety: skip protected system names and known tool folders
+            if Self.isProtectedFolder(name) {
                 continue
             }
 
-            // Check if matches an installed application
-            let isInstalled = installedAppNames.contains(name.lowercased()) ||
-                              installedAppNames.contains(name.replacingOccurrences(of: " ", with: "").lowercased())
+            // Check if matches an installed application bundle or process
+            let normalized = name.lowercased()
+            let spaceless = name.replacingOccurrences(of: " ", with: "").lowercased()
+            let isInstalled = installedAppNames.contains(normalized) || installedAppNames.contains(spaceless)
 
             if !isInstalled {
-                // Orphaned folder
+                // Secondary check: verify via Spotlight mdfind to ensure app isn't in a non-standard location
+                if await Self.doesApplicationExistOnSystem(named: name) {
+                    continue
+                }
+
+                // Legitimate uninstalled app leftover
                 let size = ProjectPurgeScanner.fastDirectorySize(at: entry.path)
-                if size > 0 {
+                if size > 1024 * 1024 { // Only surface significant leftovers (> 1 MB)
                     let modDate = (try? fileManager.attributesOfItem(atPath: entry.path)[.modificationDate]) as? Date
                     leftovers.append(AppLeftoverItem(
                         appName: name,
@@ -80,6 +109,36 @@ public actor AppLeftoverScanner {
         return leftovers.sorted { $0.sizeBytes > $1.sizeBytes }
     }
 
+    /// Checks if folder name belongs to a protected system or developer category.
+    public static func isProtectedFolder(_ name: String) -> Bool {
+        if protectedAppSupportNames.contains(name) || name.hasPrefix("com.apple.") {
+            return true
+        }
+        let lower = name.lowercased()
+        if lower.contains("keychain") || lower.contains("security") || lower.contains("tcc") {
+            return true
+        }
+        if lower.contains("inputmethod") || lower.contains("keyboard") || lower.contains("ime") {
+            return true
+        }
+        return false
+    }
+
+    /// Uses Spotlight mdfind to verify whether an application matching the name or bundle ID exists anywhere on disk.
+    public static func doesApplicationExistOnSystem(named name: String) async -> Bool {
+        // Fast probe with a 1.0 second timeout
+        let query = "kMDItemCFBundleIdentifier == '\(name)' || kMDItemFSName == '\(name).app'"
+        let result = await SafeProcessRunner.run(
+            executableURL: URL(fileURLWithPath: "/usr/bin/mdfind"),
+            arguments: [query],
+            timeoutSeconds: 1.0
+        )
+        if result.isSuccess && !result.stdout.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return true
+        }
+        return false
+    }
+
     private static func discoverInstalledAppNames() -> Set<String> {
         let fileManager = FileManager.default
         var names = Set<String>()
@@ -87,6 +146,7 @@ public actor AppLeftoverScanner {
         let candidateAppDirs = [
             URL(fileURLWithPath: "/Applications"),
             URL(fileURLWithPath: "/System/Applications"),
+            URL(fileURLWithPath: "/System/Applications/Utilities"),
             fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Applications", isDirectory: true)
         ]
 
@@ -112,6 +172,7 @@ public actor AppLeftoverScanner {
         for app in runningApps {
             if let name = app.localizedName {
                 names.insert(name.lowercased())
+                names.insert(name.replacingOccurrences(of: " ", with: "").lowercased())
             }
             if let id = app.bundleIdentifier {
                 names.insert(id.lowercased())
