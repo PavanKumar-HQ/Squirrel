@@ -23,7 +23,13 @@ public enum ValidationOutcome: Equatable, Sendable {
 }
 
 /// Validates file state immediately prior to modification or deletion to prevent TOCTOU and symlink attacks.
+/// Incorporates Mole's strict file operations safety checks (no-symlink, no incomplete download, no active SQLite).
 public struct SafetyValidator {
+    private static let protectedExtensions: Set<String> = [
+        "crdownload", "download", "part", // Incomplete downloads in progress
+        "sqlite-wal", "sqlite-shm", "db-wal", "db-shm" // Active SQLite WAL journals
+    ]
+
     public static func validate(
         path: String,
         expectedDeviceId: dev_t? = nil,
@@ -31,8 +37,13 @@ public struct SafetyValidator {
         expectedSize: Int64? = nil
     ) -> ValidationOutcome {
         // 1. Path must not be empty or root
-        guard !path.isEmpty, path != "/", path != "/System", path != "/Library", path != "/usr" else {
+        guard !path.isEmpty, path != "/", path != "/System", path != "/Library", path != "/usr", path != "/bin", path != "/sbin" else {
             return .failed(reason: "Attempted action on protected system root path: \(path)")
+        }
+
+        let ext = (path as NSString).pathExtension.lowercased()
+        if protectedExtensions.contains(ext) {
+            return .failed(reason: "File is an active download or database journal: .\(ext)")
         }
 
         // 2. Perform lstat to inspect actual filesystem node without following symlinks
@@ -42,7 +53,7 @@ public struct SafetyValidator {
             return .failed(reason: "File no longer exists or is inaccessible (errno: \(errno))")
         }
 
-        // 3. Prohibit symbolic links from being deleted as regular files
+        // 3. Prohibit symbolic links from being deleted as regular files (prevents symlink / TOCTOU substitution attacks)
         let isSymlink = (statBuf.st_mode & S_IFMT) == S_IFLNK
         if isSymlink {
             return .failed(reason: "Target path is a symbolic link; potential TOCTOU symlink substitution detected.")

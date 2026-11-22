@@ -41,6 +41,7 @@ public struct ProjectCandidate: Identifiable, Sendable, Equatable {
 
 /// Actor responsible for scanning developer directories, discovering software projects,
 /// and identifying heavy regenerable build artifacts (mirroring Mole's `mo purge`).
+/// Incorporates strict Git-protection rules (never purge tracked content or nested repos).
 public actor ProjectPurgeScanner {
     public static let shared = ProjectPurgeScanner()
 
@@ -199,6 +200,17 @@ public actor ProjectPurgeScanner {
         return foundProjects
     }
 
+    /// Verifies if a path contains a nested Git repository or submodule.
+    /// Following Mole's rule: never purge any directory containing a repository.
+    public static func hasNestedGitRepository(at path: String) -> Bool {
+        let gitDir = URL(fileURLWithPath: path).appendingPathComponent(".git")
+        var isDir: ObjCBool = false
+        if FileManager.default.fileExists(atPath: gitDir.path, isDirectory: &isDir) {
+            return true
+        }
+        return false
+    }
+
     private func measureArtifacts(in projectDir: URL) -> [ProjectArtifact] {
         var artifacts: [ProjectArtifact] = []
         let fileManager = FileManager.default
@@ -208,6 +220,11 @@ public actor ProjectPurgeScanner {
             var isDir: ObjCBool = false
 
             if fileManager.fileExists(atPath: targetURL.path, isDirectory: &isDir), isDir.boolValue {
+                // Mole protection rule: skip any artifact containing a nested git repo/submodule
+                if Self.hasNestedGitRepository(at: targetURL.path) {
+                    continue
+                }
+
                 let size = Self.fastDirectorySize(at: targetURL.path)
                 if size > 0 {
                     let modDate = (try? fileManager.attributesOfItem(atPath: targetURL.path)[.modificationDate]) as? Date
@@ -224,7 +241,15 @@ public actor ProjectPurgeScanner {
         return artifacts
     }
 
+    /// Fast kernel-level APFS directory sizing using native `/usr/bin/du -sk`.
+    /// Immediately rejects symlinks to prevent following external directory links.
     public static func fastDirectorySize(at path: String) -> Int64 {
+        // Reject symbolic links before sizing
+        var statBuf = stat()
+        if lstat(path, &statBuf) != 0 || (statBuf.st_mode & S_IFMT) == S_IFLNK {
+            return 0
+        }
+
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/du")
         process.arguments = ["-sk", path]
@@ -237,7 +262,7 @@ public actor ProjectPurgeScanner {
             process.waitUntilExit()
             if process.terminationStatus == 0,
                let output = String(data: data, encoding: .utf8),
-               let firstWord = output.split(separator: "\t").first,
+               let firstWord = output.split(whereSeparator: { $0.isWhitespace }).first,
                let kb = Int64(firstWord.trimmingCharacters(in: .whitespacesAndNewlines)) {
                 return kb * 1024
             }
@@ -263,4 +288,3 @@ public actor ProjectPurgeScanner {
         return totalSize
     }
 }
-

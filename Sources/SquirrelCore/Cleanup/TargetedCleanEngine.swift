@@ -121,7 +121,7 @@ public actor TargetedCleanEngine {
         let safetyGuard = ProcessSafetyGuard.shared
         let hasFDA = Self.checkFullDiskAccess
 
-        // 1. DEVELOPER TOOLS (High Yield: Xcode, SwiftPM, Rust, Node, Web, Python)
+        // 1. DEVELOPER TOOLS (High Yield: Xcode, SwiftPM, Rust, Node, Web, Python, Go, Simulators)
         progressHandler?("Checking developer build caches...")
 
         let devCachePaths: [(name: String, relPath: String, desc: String)] = [
@@ -131,8 +131,11 @@ public actor TargetedCleanEngine {
             ("CoreSimulator Caches", "Library/Developer/CoreSimulator/Caches", "iOS Simulator runtime caches"),
             ("npm Cache", ".npm/_cacache", "Node.js npm package download cache"),
             ("pnpm Store", ".local/share/pnpm/store", "pnpm global content-addressable package store"),
+            ("Yarn Cache", "Library/Caches/Yarn", "Yarn Classic package archive cache"),
+            ("Bun Cache", ".bun/install/cache", "Bun package manager dependency cache"),
             ("Cargo Registry Cache", ".cargo/registry/cache", "Rust Cargo crate source archives"),
             ("Cargo Git DB", ".cargo/git/db", "Rust Cargo git repositories cache"),
+            ("Go Build Cache", "Library/Caches/go-build", "Go compiler build object cache"),
             ("Gradle Caches", ".gradle/caches", "Java / Android Gradle dependency cache"),
             ("Pip Cache", "Library/Caches/pip", "Python pip wheel and package cache"),
             ("uv Cache", ".cache/uv", "Python uv fast package manager cache"),
@@ -156,6 +159,32 @@ public actor TargetedCleanEngine {
                         isProcessRunning: procCheck.isRunning,
                         activeProcessName: procCheck.appName
                     ))
+                }
+            }
+        }
+
+        // Simulator device caches for shut-down simulators (mirroring Mole's _SIMULATOR_DEVICE_LEAVES)
+        let simDevicesURL = home.appendingPathComponent("Library/Developer/CoreSimulator/Devices")
+        if let simDevices = try? fileManager.contentsOfDirectory(at: simDevicesURL, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) {
+            for simDevice in simDevices {
+                let devicePlist = simDevice.appendingPathComponent("device.plist")
+                // Check if device is shut down: state == 1
+                if let plistData = try? Data(contentsOf: devicePlist),
+                   let plist = try? PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any],
+                   let state = plist["state"] as? Int, state == 1 {
+                    let assetsURL = simDevice.appendingPathComponent("data/private/var/MobileAsset/AssetsV2")
+                    if fileManager.fileExists(atPath: assetsURL.path) {
+                        let size = ProjectPurgeScanner.fastDirectorySize(at: assetsURL.path)
+                        if size > 10 * 1024 * 1024 {
+                            cleanableItems.append(CleanableItem(
+                                name: "Simulator Assets (\(simDevice.lastPathComponent.prefix(8)))",
+                                path: assetsURL.path,
+                                sizeBytes: size,
+                                category: .developerTools,
+                                detail: "MobileAsset runtime assets from shut-down iOS simulator"
+                            ))
+                        }
+                    }
                 }
             }
         }
@@ -209,8 +238,37 @@ public actor TargetedCleanEngine {
             }
         }
 
-        // 3. APP CACHES & LOGS (Targeted High-Yield App Caches)
-        progressHandler?("Checking application caches...")
+        // 3. APP CACHES & LOGS (Targeted High-Yield App Caches + Service Worker CacheStorage)
+        progressHandler?("Checking application and browser caches...")
+
+        // Direct Chromium / WebKit Service Worker Cache Storage (Mole's high-yield source: 5-15 GB!)
+        let serviceWorkerPaths: [(name: String, relPath: String, desc: String)] = [
+            ("Google Chrome Service Workers", "Library/Application Support/Google/Chrome/Default/Service Worker/CacheStorage", "Chrome offline web app assets and cached service worker media"),
+            ("Brave Browser Service Workers", "Library/Application Support/BraveSoftware/Brave-Browser/Default/Service Worker/CacheStorage", "Brave offline web application and worker cache"),
+            ("Microsoft Edge Service Workers", "Library/Application Support/Microsoft Edge/Default/Service Worker/CacheStorage", "Edge offline service worker assets"),
+            ("Arc Browser Service Workers", "Library/Application Support/Arc/User Data/Default/Service Worker/CacheStorage", "Arc browser offline web app and service worker storage"),
+            ("Vivaldi Service Workers", "Library/Application Support/Vivaldi/Default/Service Worker/CacheStorage", "Vivaldi offline service worker cache")
+        ]
+
+        for sw in serviceWorkerPaths {
+            let fullURL = home.appendingPathComponent(sw.relPath)
+            if fileManager.fileExists(atPath: fullURL.path) {
+                let size = ProjectPurgeScanner.fastDirectorySize(at: fullURL.path)
+                if size > 5 * 1024 * 1024 { // Only include if > 5 MB
+                    let procCheck = safetyGuard.isApplicationRunning(forPath: fullURL.path)
+                    cleanableItems.append(CleanableItem(
+                        name: sw.name,
+                        path: fullURL.path,
+                        sizeBytes: size,
+                        category: .appCaches,
+                        detail: sw.desc,
+                        isSelected: !procCheck.isRunning,
+                        isProcessRunning: procCheck.isRunning,
+                        activeProcessName: procCheck.appName
+                    ))
+                }
+            }
+        }
 
         let curatedAppCaches: [(name: String, relPath: String, desc: String)] = [
             ("Google Chrome Cache", "Library/Caches/Google/Chrome", "Chrome browser page and media cache"),

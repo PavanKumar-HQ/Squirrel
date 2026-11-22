@@ -851,10 +851,24 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         var cleanedCount = 0
         var skippedCount = 0
         var skippedReasons: [String] = []
+        var itemsActuallyCleaned: [CleanableItem] = []
         let safetyGuard = ProcessSafetyGuard.shared
 
         for item in selected {
-            // Safety guard: protect running applications/CLI daemons
+            // Step 1: Pre-flight safety validation (prevents TOCTOU, symlinks, downloads, WAL journals)
+            if item.category != .systemData || !item.name.starts(with: "APFS Snapshot:") {
+                let outcome = SafetyValidator.validate(path: item.path)
+                switch outcome {
+                case .passed:
+                    break
+                case .failed(let reason):
+                    skippedCount += 1
+                    skippedReasons.append("\(item.name) skipped: \(reason)")
+                    continue
+                }
+            }
+
+            // Step 2: Active Process & SingletonLock Safety Guard
             let runningCheck = safetyGuard.isApplicationRunning(forPath: item.path)
             if runningCheck.isRunning, let appName = runningCheck.appName {
                 skippedCount += 1
@@ -862,16 +876,26 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 continue
             }
 
+            // Step 3: Action execution (Snapshots via tmutil, files via macOS Trash)
             if item.category == .systemData && item.name.starts(with: "APFS Snapshot:") {
                 let success = await snapshotManager.deleteSnapshot(LocalSnapshot(name: item.name, dateString: item.path, isTimeMachine: true))
                 if success {
                     cleanedCount += 1
+                    itemsActuallyCleaned.append(item)
+                } else {
+                    skippedCount += 1
+                    skippedReasons.append("APFS Snapshot deletion requires elevated administrator privileges.")
                 }
             } else {
                 let url = URL(fileURLWithPath: item.path)
                 var resultingURL: NSURL?
-                if (try? FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)) != nil {
+                do {
+                    try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
                     cleanedCount += 1
+                    itemsActuallyCleaned.append(item)
+                } catch {
+                    skippedCount += 1
+                    skippedReasons.append("\(item.name) could not be moved to Trash: \(error.localizedDescription)")
                 }
             }
         }
@@ -879,7 +903,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         let postSpace = VolumeSpace.querySystemVolume()
         let verifiedReclaimed = max(0, postSpace.availableCapacity - initialSpace.availableCapacity)
         let feedback = CleanResultFeedback(
-            reclaimedBytes: verifiedReclaimed > 0 ? verifiedReclaimed : selected.reduce(0) { $0 + $1.sizeBytes },
+            reclaimedBytes: verifiedReclaimed > 0 ? verifiedReclaimed : itemsActuallyCleaned.reduce(0) { $0 + $1.sizeBytes },
             itemsCleanedCount: cleanedCount,
             itemsSkippedCount: skippedCount,
             skippedReasons: skippedReasons
