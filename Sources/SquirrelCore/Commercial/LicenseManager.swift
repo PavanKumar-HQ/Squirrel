@@ -144,3 +144,4 @@ public final class LicenseManager: @unchecked Sendable {
         return "\(part1)-\(part2)-\(part3)-\(part4)"
     }
 }
+
