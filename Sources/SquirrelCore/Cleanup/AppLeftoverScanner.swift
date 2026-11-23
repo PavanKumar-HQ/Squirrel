@@ -124,11 +124,24 @@ public actor AppLeftoverScanner {
         return false
     }
 
-    /// Uses native macOS LaunchServices to verify whether an application matching the bundle ID exists on disk.
-    /// Executes instantly (< 0.1ms) without spawning subprocesses or scanning Spotlight.
+    /// Uses native macOS LaunchServices to verify whether an application matching the name or derived
+    /// bundle ID pattern exists on disk. Executes instantly (< 0.1ms) without spawning subprocesses.
+    /// Strategy: Try the folder name as a bundle ID suffix first (e.g. "com.company.AppName"),
+    /// then try constructing common reverse-domain bundle IDs from the folder name.
     public static func doesApplicationExistInLaunchServices(named name: String) -> Bool {
-        if NSWorkspace.shared.urlForApplication(withBundleIdentifier: name) != nil {
+        // 1. Direct bundle ID match (some folders are named like "com.apple.Safari")
+        if name.contains("."), NSWorkspace.shared.urlForApplication(withBundleIdentifier: name) != nil {
             return true
+        }
+        // 2. Try common bundle ID prefixes with the folder name
+        let normalizedName = name.replacingOccurrences(of: " ", with: "")
+        let commonPrefixes = ["com.apple.", "com.google.", "com.microsoft.", "com.adobe.",
+                              "com.spotify.", "org.mozilla.", "com.jetbrains.", "io.", "app."]
+        for prefix in commonPrefixes {
+            let guessedId = "\(prefix)\(normalizedName.lowercased())"
+            if NSWorkspace.shared.urlForApplication(withBundleIdentifier: guessedId) != nil {
+                return true
+            }
         }
         return false
     }

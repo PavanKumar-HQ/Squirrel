@@ -174,25 +174,39 @@ public actor TargetedCleanEngine {
         }
 
         // Simulator device caches for shut-down simulators (mirroring Mole's _SIMULATOR_DEVICE_LEAVES)
+        // Mole removes 5 leaf paths per shut-down device (state == 1 in device.plist)
+        let simDeviceLeaves: [String] = [
+            "data/private/var/MobileAsset/AssetsV2",
+            "data/var/db/diagnostics",
+            "data/var/db/uuidtext",
+            "data/Library/Caches",
+            "data/Library/Application Support/PRBPosterExtensionDataStore"
+        ]
         let simDevicesURL = home.appendingPathComponent("Library/Developer/CoreSimulator/Devices")
         if let simDevices = try? fileManager.contentsOfDirectory(at: simDevicesURL, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles]) {
             for simDevice in simDevices {
                 let devicePlist = simDevice.appendingPathComponent("device.plist")
-                // Check if device is shut down: state == 1
+                // Check if device is shut down: state == 1 (Mole's exact condition)
                 if let plistData = try? Data(contentsOf: devicePlist),
                    let plist = try? PropertyListSerialization.propertyList(from: plistData, format: nil) as? [String: Any],
                    let state = plist["state"] as? Int, state == 1 {
-                    let assetsURL = simDevice.appendingPathComponent("data/private/var/MobileAsset/AssetsV2")
-                    if fileManager.fileExists(atPath: assetsURL.path) {
-                        let size = ProjectPurgeScanner.fastDirectorySize(at: assetsURL.path)
-                        if size > 10 * 1024 * 1024 {
-                            cleanableItems.append(CleanableItem(
-                                name: "Simulator Assets (\(simDevice.lastPathComponent.prefix(8)))",
-                                path: assetsURL.path,
-                                sizeBytes: size,
-                                category: .developerTools,
-                                detail: "MobileAsset runtime assets from shut-down iOS simulator"
-                            ))
+                    // Check it's not marked as deleted
+                    let isDeleted = (plist["isDeleted"] as? Bool) ?? false
+                    guard !isDeleted else { continue }
+                    for leaf in simDeviceLeaves {
+                        let leafURL = simDevice.appendingPathComponent(leaf)
+                        if fileManager.fileExists(atPath: leafURL.path) {
+                            let size = ProjectPurgeScanner.fastDirectorySize(at: leafURL.path)
+                            if size > 10 * 1024 * 1024 {
+                                let leafName = URL(fileURLWithPath: leaf).lastPathComponent
+                                cleanableItems.append(CleanableItem(
+                                    name: "Simulator \(leafName) (\(simDevice.lastPathComponent.prefix(8)))",
+                                    path: leafURL.path,
+                                    sizeBytes: size,
+                                    category: .developerTools,
+                                    detail: "Simulator \(leaf) from shut-down iOS device"
+                                ))
+                            }
                         }
                     }
                 }

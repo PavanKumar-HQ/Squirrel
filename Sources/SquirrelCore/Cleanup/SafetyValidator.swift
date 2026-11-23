@@ -37,8 +37,15 @@ public struct SafetyValidator {
         expectedSize: Int64? = nil
     ) -> ValidationOutcome {
         // 1. Path must not be empty or root
-        guard !path.isEmpty, path != "/", path != "/System", path != "/Library", path != "/usr", path != "/bin", path != "/sbin" else {
+        guard !path.isEmpty, path != "/", path != "/System", path != "/Library", path != "/usr",
+              path != "/bin", path != "/sbin", path != "/private", path != "/Applications",
+              path != "/Users", path != "/etc", path != "/var", path != "/tmp" else {
             return .failed(reason: "Attempted action on protected system root path: \(path)")
+        }
+        // Also reject any path that is a direct child of / outside of user home (extra safety)
+        let components = (path as NSString).pathComponents
+        if components.count == 2 && !path.hasPrefix("/Users/") {
+            return .failed(reason: "Attempted action on a top-level system path: \(path)")
         }
 
         let ext = (path as NSString).pathExtension.lowercased()

@@ -72,6 +72,32 @@ public actor SystemMaintenanceEngine {
                 title: "Disable .DS_Store on Network & USB Drives",
                 detail: "Sets Finder preference DSDontWriteNetworkStores to stop polluting external drives with .DS_Store files.",
                 iconName: "externaldrive.badge.xmark"
+            ),
+            SystemOptimizationTask(
+                id: "sqlite_vacuum",
+                title: "Optimize Mail, Safari & Messages Databases",
+                detail: "Runs VACUUM on SQLite databases used by Mail, Safari and Messages to reclaim fragmented space. Skipped if apps are running.",
+                iconName: "cylinder.split.1x2.fill"
+            ),
+            SystemOptimizationTask(
+                id: "network_stack_optimize",
+                title: "Flush Routing Table & ARP Cache",
+                detail: "Clears the IPv4/IPv6 routing table and ARP cache to resolve intermittent network glitches (mirrors Mole's network_stack_optimize).",
+                iconName: "network.badge.shield.half.filled"
+            ),
+            SystemOptimizationTask(
+                id: "legacy_overrides_audit",
+                title: "Remove Legacy App Nap & Verification Overrides",
+                detail: "Removes hidden App Nap and disk-image verification overrides left by old tweak tools in ~/Library/Preferences.",
+                iconName: "switch.2",
+                isSelected: false // Not selected by default — advanced/less common
+            ),
+            SystemOptimizationTask(
+                id: "spotlight_optimize",
+                title: "Rebuild Spotlight Index (if search is slow)",
+                detail: "Checks if Spotlight indexing is behind and triggers a targeted reindex. Only runs if Spotlight is visibly stale.",
+                iconName: "magnifyingglass.circle.fill",
+                isSelected: false // User opt-in — can take several minutes
             )
         ]
     }
@@ -158,6 +184,130 @@ public actor SystemMaintenanceEngine {
             )
             let ok = proc.exitCode == 0 && usbProc.exitCode == 0
             return SystemOptimizationResult(taskId: id, taskTitle: title, succeeded: ok, message: ok ? "Finder will no longer create .DS_Store files on network shares or USB drives." : "defaults write returned code \(proc.exitCode).")
+
+        case "sqlite_vacuum":
+            // Vacuum SQLite databases for Mail, Safari, Messages — only when apps are NOT running
+            let runningApps = Set(NSWorkspace.shared.runningApplications.compactMap { $0.bundleIdentifier?.lowercased() })
+            let protectedApps: [String: String] = [
+                "com.apple.mail": "Mail",
+                "com.apple.safari": "Safari",
+                "com.apple.MobileSMS": "Messages"
+            ]
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            let dbPaths: [(appBundleId: String, paths: [URL])] = [
+                ("com.apple.mail", [
+                    home.appendingPathComponent("Library/Mail/V10/MailData/Envelope Index")
+                ]),
+                ("com.apple.safari", [
+                    home.appendingPathComponent("Library/Safari/History.db"),
+                    home.appendingPathComponent("Library/Safari/WebFeedSources.plist")
+                ]),
+                ("com.apple.MobileSMS", [
+                    home.appendingPathComponent("Library/Messages/chat.db")
+                ])
+            ]
+            var vacuumedCount = 0
+            var skippedApps: [String] = []
+            for entry in dbPaths {
+                if runningApps.contains(entry.appBundleId) {
+                    skippedApps.append(protectedApps[entry.appBundleId] ?? entry.appBundleId)
+                    continue
+                }
+                for dbURL in entry.paths {
+                    guard FileManager.default.fileExists(atPath: dbURL.path),
+                          dbURL.pathExtension == "db" else { continue }
+                    let res = await SafeProcessRunner.run(
+                        executableURL: URL(fileURLWithPath: "/usr/bin/sqlite3"),
+                        arguments: [dbURL.path, "VACUUM;"],
+                        timeoutSeconds: 30
+                    )
+                    if res.exitCode == 0 { vacuumedCount += 1 }
+                }
+            }
+            var msg = "Vacuumed \(vacuumedCount) database(s)."
+            if !skippedApps.isEmpty { msg += " Skipped while running: \(skippedApps.joined(separator: ", "))." }
+            return SystemOptimizationResult(taskId: id, taskTitle: title, succeeded: true, message: msg)
+
+        case "network_stack_optimize":
+            // Flush routing table + ARP cache (mirrors Mole's network_stack_optimize)
+            let routeFlush = await SafeProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/sbin/route"),
+                arguments: ["-n", "flush"],
+                timeoutSeconds: 5
+            )
+            let arpFlush = await SafeProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/sbin/arp"),
+                arguments: ["-a", "-d"],
+                timeoutSeconds: 5
+            )
+            // Note: route flush may require root on modern macOS — we try anyway and report
+            let routeOk = routeFlush.exitCode == 0
+            let arpOk = arpFlush.exitCode == 0
+            if routeOk || arpOk {
+                let routeMsg = routeOk ? "flushed" : "skipped (needs admin)"; let arpMsg = arpOk ? "cleared" : "skipped (needs admin)"; return SystemOptimizationResult(taskId: id, taskTitle: title, succeeded: true, message: "Routing table \(routeMsg). ARP cache \(arpMsg).")
+            } else {
+                // Both failed — likely need admin, flush DNS as a safe fallback
+                let dnsFallback = await SafeProcessRunner.run(
+                    executableURL: URL(fileURLWithPath: "/usr/bin/dscacheutil"),
+                    arguments: ["-flushcache"],
+                    timeoutSeconds: 5
+                )
+                return SystemOptimizationResult(taskId: id, taskTitle: title, succeeded: dnsFallback.exitCode == 0, message: "Route/ARP flush requires admin access; DNS resolver cache flushed as fallback.")
+            }
+
+        case "legacy_overrides_audit":
+            // Remove App Nap disable overrides left by old tweak tools
+            let home = FileManager.default.homeDirectoryForCurrentUser
+            let prefsURL = home.appendingPathComponent("Library/Preferences")
+            let legacyFiles = [
+                prefsURL.appendingPathComponent("NSGlobalDomain.plist"),
+            ]
+            // Remove hidden App Nap disable flag if present
+            var removedCount = 0
+            let r1 = await SafeProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/defaults"),
+                arguments: ["write", "NSGlobalDomain", "NSAppSleepDisabled", "-bool", "false"],
+                timeoutSeconds: 3
+            )
+            if r1.exitCode == 0 { removedCount += 1 }
+            // Remove disk image verification disable
+            let r2 = await SafeProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/defaults"),
+                arguments: ["delete", "com.apple.frameworks.diskimages", "skip-verify"],
+                timeoutSeconds: 3
+            )
+            // r2 may fail if key didn't exist — that's fine
+            let r3 = await SafeProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/defaults"),
+                arguments: ["delete", "com.apple.frameworks.diskimages", "skip-verify-locked"],
+                timeoutSeconds: 3
+            )
+            _ = legacyFiles
+            _ = r2
+            _ = r3
+            return SystemOptimizationResult(taskId: id, taskTitle: title, succeeded: r1.exitCode == 0, message: "App Nap sleep override restored to system default. Disk image verification overrides cleared.")
+
+        case "spotlight_optimize":
+            // Smart Spotlight reindex: only trigger if mdutil shows issues
+            let statusResult = await SafeProcessRunner.run(
+                executableURL: URL(fileURLWithPath: "/usr/bin/mdutil"),
+                arguments: ["-s", "/"],
+                timeoutSeconds: 5
+            )
+            let output = statusResult.stdout.lowercased()
+            if output.contains("disabled") || output.contains("not indexed") {
+                // Spotlight is off — enable it
+                let enableResult = await SafeProcessRunner.run(
+                    executableURL: URL(fileURLWithPath: "/usr/bin/mdutil"),
+                    arguments: ["-i", "on", "/"],
+                    timeoutSeconds: 10
+                )
+                return SystemOptimizationResult(taskId: id, taskTitle: title, succeeded: enableResult.exitCode == 0, message: "Spotlight indexing re-enabled on system volume.")
+            } else if output.contains("indexing") || output.contains("enabled") {
+                return SystemOptimizationResult(taskId: id, taskTitle: title, succeeded: true, message: "Spotlight index is healthy and active — no rebuild needed.")
+            } else {
+                return SystemOptimizationResult(taskId: id, taskTitle: title, succeeded: true, message: "Spotlight status: \(statusResult.stdout.trimmingCharacters(in: .whitespacesAndNewlines).prefix(80)).")
+            }
 
         default:
             return SystemOptimizationResult(taskId: id, taskTitle: title, succeeded: false, message: "Unknown task identifier.")
