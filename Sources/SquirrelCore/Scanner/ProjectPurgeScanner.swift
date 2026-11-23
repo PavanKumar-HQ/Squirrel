@@ -241,14 +241,27 @@ public actor ProjectPurgeScanner {
         return artifacts
     }
 
-    /// Fast kernel-level APFS directory sizing using native `/usr/bin/du -sk`.
+    /// Fast kernel-level APFS directory sizing with thread-safe mtime caching and `/usr/bin/du -sk`.
     /// Immediately rejects symlinks to prevent following external directory links.
+    private static let sizeCacheLock = NSLock()
+    private static var sizeCache: [String: (mtime: time_t, size: Int64)] = [:]
+
     public static func fastDirectorySize(at path: String) -> Int64 {
         // Reject symbolic links before sizing
         var statBuf = stat()
         if lstat(path, &statBuf) != 0 || (statBuf.st_mode & S_IFMT) == S_IFLNK {
             return 0
         }
+
+        // Check in-memory mtime cache: if directory mtime hasn't changed, return cached size (0.0001ms)
+        sizeCacheLock.lock()
+        if let cached = sizeCache[path], cached.mtime == statBuf.st_mtimespec.tv_sec {
+            sizeCacheLock.unlock()
+            return cached.size
+        }
+        sizeCacheLock.unlock()
+
+        var calculatedSize: Int64 = 0
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/du")
@@ -264,27 +277,34 @@ public actor ProjectPurgeScanner {
                let output = String(data: data, encoding: .utf8),
                let firstWord = output.split(whereSeparator: { $0.isWhitespace }).first,
                let kb = Int64(firstWord.trimmingCharacters(in: .whitespacesAndNewlines)) {
-                return kb * 1024
+                calculatedSize = kb * 1024
             }
         } catch {
             // Fall back below
         }
 
-        // Fallback for sandboxed or test environments
-        let fileManager = FileManager.default
-        let url = URL(fileURLWithPath: path)
-        guard let enumerator = fileManager.enumerator(
-            at: url,
-            includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileSizeKey],
-            options: []
-        ) else { return 0 }
-
-        var totalSize: Int64 = 0
-        while let fileURL = enumerator.nextObject() as? URL {
-            if let resourceValues = try? fileURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileSizeKey]) {
-                totalSize += Int64(resourceValues.totalFileAllocatedSize ?? resourceValues.fileSize ?? 0)
+        if calculatedSize == 0 {
+            // Fallback for sandboxed or test environments
+            let fileManager = FileManager.default
+            let url = URL(fileURLWithPath: path)
+            if let enumerator = fileManager.enumerator(
+                at: url,
+                includingPropertiesForKeys: [.totalFileAllocatedSizeKey, .fileSizeKey],
+                options: []
+            ) {
+                while let fileURL = enumerator.nextObject() as? URL {
+                    if let resourceValues = try? fileURL.resourceValues(forKeys: [.totalFileAllocatedSizeKey, .fileSizeKey]) {
+                        calculatedSize += Int64(resourceValues.totalFileAllocatedSize ?? resourceValues.fileSize ?? 0)
+                    }
+                }
             }
         }
-        return totalSize
+
+        // Cache the measured size
+        sizeCacheLock.lock()
+        sizeCache[path] = (mtime: statBuf.st_mtimespec.tv_sec, size: calculatedSize)
+        sizeCacheLock.unlock()
+
+        return calculatedSize
     }
 }

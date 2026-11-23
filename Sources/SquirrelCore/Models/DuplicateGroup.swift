@@ -11,6 +11,8 @@ public struct DuplicateMember: Identifiable, Codable, Sendable, Equatable {
     public let creationDate: Date?
     public let isRecommendedToKeep: Bool
     public let keepReason: String?
+    public let isAPFSClone: Bool
+    public let isHardlink: Bool
 
     public init(
         id: UUID = UUID(),
@@ -21,7 +23,9 @@ public struct DuplicateMember: Identifiable, Codable, Sendable, Equatable {
         modificationDate: Date?,
         creationDate: Date?,
         isRecommendedToKeep: Bool = false,
-        keepReason: String? = nil
+        keepReason: String? = nil,
+        isAPFSClone: Bool = false,
+        isHardlink: Bool = false
     ) {
         self.id = id
         self.path = path
@@ -32,6 +36,8 @@ public struct DuplicateMember: Identifiable, Codable, Sendable, Equatable {
         self.creationDate = creationDate
         self.isRecommendedToKeep = isRecommendedToKeep
         self.keepReason = keepReason
+        self.isAPFSClone = isAPFSClone
+        self.isHardlink = isHardlink
     }
 }
 

@@ -971,6 +971,65 @@ await runAsyncTest("TargetedCleanEngine 4-Category Audit Efficiency") {
     assertTest(summary.totalAvailableBytes > 0, "Cleanable bytes discovered: \(ByteCountFormatter.string(fromByteCount: summary.totalAvailableBytes, countStyle: .file))")
 }
 
+// Test 26: APFSCloneDetector Darwin Syscall Inspection
+await runAsyncTest("APFSCloneDetector Darwin Syscall Inspection") {
+    let testFile = tempDir.appendingPathComponent("clone_test.dat")
+    try Data("Squirrel CoW clone test data".utf8).write(to: testFile)
+
+    let info = APFSCloneDetector.inspectClone(at: testFile.path)
+    assertTest(info.inode > 0, "APFSCloneDetector retrieved positive inode (\(info.inode))")
+    assertTest(!info.isHardlink, "Single file is not a hardlink")
+
+    // Test non-existent path
+    let missing = APFSCloneDetector.inspectClone(at: "/path/that/does/not/exist_123")
+    assertTest(!missing.isCloned, "Missing path safely returns non-cloned")
+    assertTest(missing.inode == 0, "Missing path returns zero inode")
+}
+
+// Test 27: LicenseManager Commercialization & Tier Validation
+await runAsyncTest("LicenseManager Commercialization & Tier Validation") {
+    let lm = LicenseManager.shared
+    lm.deactivate()
+
+    assertTest(!lm.isPro, "Initial state or deactivated state is Free tier")
+    assertTest(lm.remainingFreeBytes <= LicenseManager.freeCleaningAllowanceBytes, "Remaining free bytes bounded by 5 GB allowance")
+
+    // Test invalid key
+    let badRes = lm.activate(key: "INVALID-KEY-123")
+    assertTest(!badRes.success, "Invalid license key correctly rejected")
+
+    // Test valid generated Pro key
+    let validKey = LicenseManager.generateTestProKey(seed: "SquirrelPro2026")
+    let goodRes = lm.activate(key: validKey)
+    assertTest(goodRes.success, "Valid algorithmic license key activated successfully")
+    assertTest(lm.isPro, "LicenseManager tier updated to Pro Lifetime")
+    assertTest(lm.canClean(bytes: 100 * 1024 * 1024 * 1024), "Pro tier permits unlimited cleaning (> 100 GB)")
+
+    // Clean up
+    lm.deactivate()
+    assertTest(!lm.isPro, "LicenseManager deactivated back to Free cleanly")
+}
+
+// Test 28: Fast Directory Size Mtime Cache Throughput
+await runAsyncTest("Fast Directory Size Mtime Cache Throughput") {
+    let cacheDir = tempDir.appendingPathComponent("CacheBenchmarkDir", isDirectory: true)
+    try FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+    let f1 = cacheDir.appendingPathComponent("file1.bin")
+    try Data(repeating: 0x55, count: 1024 * 64).write(to: f1)
+
+    // First call: populates cache
+    let size1 = ProjectPurgeScanner.fastDirectorySize(at: cacheDir.path)
+    assertTest(size1 >= 64 * 1024, "First sizing accounted for at least 64 KB (\(size1) bytes)")
+
+    // Second call: hits in-memory cache instantly
+    let start = Date()
+    let size2 = ProjectPurgeScanner.fastDirectorySize(at: cacheDir.path)
+    let elapsed = Date().timeIntervalSince(start)
+
+    assertTest(size1 == size2, "Cached size matches initial size exactly")
+    assertTest(elapsed < 0.01, "Cached directory size query completed in < 10ms (took \(String(format: "%.4f", elapsed))s)")
+}
+
 print("\n==================================================")
 print("  Test Results: \(passedCount) Passed, \(failedCount) Failed")
 print("==================================================")

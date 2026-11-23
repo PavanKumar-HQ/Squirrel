@@ -33,13 +33,45 @@ public struct SquirrelApp: App {
                         }
 
                         VStack(alignment: .leading, spacing: 1) {
-                            Text("Squirrel")
-                                .font(.system(size: 15, weight: .bold))
+                            HStack(spacing: 5) {
+                                Text("Squirrel")
+                                    .font(.system(size: 15, weight: .bold))
+
+                                if appState.isPro {
+                                    Text("PRO")
+                                        .font(.system(size: 9, weight: .heavy))
+                                        .foregroundColor(.white)
+                                        .padding(.horizontal, 5)
+                                        .padding(.vertical, 1.5)
+                                        .background(Capsule().fill(SquirrelTheme.brandWarm))
+                                }
+                            }
+
                             Text("Storage Optimizer")
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                         }
                         Spacer()
+
+                        if !appState.isPro {
+                            Button {
+                                appState.showUpgradeSheet = true
+                            } label: {
+                                HStack(spacing: 3) {
+                                    Image(systemName: "sparkles")
+                                        .font(.system(size: 9))
+                                    Text("Upgrade")
+                                        .font(.system(size: 10, weight: .bold))
+                                }
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 3.5)
+                                .background(SquirrelTheme.brandWarm.opacity(0.15))
+                                .foregroundColor(SquirrelTheme.brandWarm)
+                                .cornerRadius(6)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Upgrade to Squirrel Pro Lifetime")
+                        }
                     }
                     .padding(.horizontal, 16)
                     .padding(.top, 14)
@@ -210,6 +242,9 @@ public struct SquirrelApp: App {
                         }
                     )
                 }
+            }
+            .sheet(isPresented: $appState.showUpgradeSheet) {
+                UpgradeToProView(appState: appState)
             }
         }
         .windowStyle(.titleBar)

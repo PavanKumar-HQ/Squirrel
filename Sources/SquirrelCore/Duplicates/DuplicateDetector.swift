@@ -98,7 +98,13 @@ public actor DuplicateDetector {
             var members: [DuplicateMember] = []
             for (index, file) in sortedFiles.enumerated() {
                 let isKeep = (index == 0)
-                let reason = isKeep ? "Original copy based on earliest modification date" : "Duplicate copy"
+                let cloneInfo = APFSCloneDetector.inspectClone(at: file.path)
+                var reason = isKeep ? "Original copy based on earliest modification date" : "Duplicate copy"
+                if cloneInfo.sharesAllBlocks {
+                    reason += " (Zero-cost APFS Copy-on-Write clone)"
+                } else if cloneInfo.isHardlink {
+                    reason += " (POSIX hardlink)"
+                }
                 members.append(DuplicateMember(
                     path: file.path,
                     fileName: file.name,
@@ -107,7 +113,9 @@ public actor DuplicateDetector {
                     modificationDate: file.modificationDate,
                     creationDate: file.modificationDate,
                     isRecommendedToKeep: isKeep,
-                    keepReason: reason
+                    keepReason: reason,
+                    isAPFSClone: cloneInfo.sharesAllBlocks,
+                    isHardlink: cloneInfo.isHardlink
                 ))
             }
 

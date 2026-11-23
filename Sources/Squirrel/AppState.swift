@@ -82,6 +82,20 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     // Volume metrics
     @Published public var volumeSpace: VolumeSpace = VolumeSpace.querySystemVolume()
 
+    // Commercialization & Licensing (Monetization Engine)
+    @Published public var isPro: Bool = LicenseManager.shared.isPro
+    @Published public var showUpgradeSheet: Bool = false
+    @Published public var remainingFreeBytes: Int64 = LicenseManager.shared.remainingFreeBytes
+    @Published public var licenseKeyInput: String = ""
+    @Published public var licenseActivationMessage: String? = nil
+    @Published public var isLicenseSuccess: Bool = false
+    @Published public var isActivatingLicense: Bool = false
+
+    public func refreshLicenseState() {
+        self.isPro = LicenseManager.shared.isPro
+        self.remainingFreeBytes = LicenseManager.shared.remainingFreeBytes
+    }
+
     // Scan State
     @Published public var scanStatus: ScanStatus = .idle
     @Published public var scanProgress: ScanProgress = ScanProgress()
@@ -959,6 +973,8 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         )
 
         await MainActor.run {
+            LicenseManager.shared.recordReclaimedBytes(feedback.reclaimedBytes)
+            self.refreshLicenseState()
             self.lastCleanResult = feedback
             self.showCleanResultBanner = true
             self.performHubAudit()

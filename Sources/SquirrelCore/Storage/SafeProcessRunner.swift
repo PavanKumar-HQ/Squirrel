@@ -93,6 +93,10 @@ public actor SafeProcessRunner {
 
         do {
             try process.run()
+            // Crucial POSIX fix: parent must close write handles so child holds the only write end.
+            // This prevents readDataToEndOfFile() from hanging indefinitely waiting for EOF.
+            try? outPipe.fileHandleForWriting.close()
+            try? errPipe.fileHandleForWriting.close()
         } catch {
             outPipe.fileHandleForReading.readabilityHandler = nil
             errPipe.fileHandleForReading.readabilityHandler = nil
