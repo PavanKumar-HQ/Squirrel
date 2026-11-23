@@ -314,7 +314,7 @@ public struct DashboardView: View {
             ),
             titleVisibility: .visible
         ) {
-            Button("Clean Safely (\(ByteCountFormatter.string(fromByteCount: appState.safeToCleanBytes, countStyle: .file)))", role: .destructive) {
+            Button("Clean Safely (\(SquirrelFormatters.formatPrecise(appState.safeToCleanBytes)))", role: .destructive) {
                 appState.executeSafeBatch()
             }
             Button("Cancel", role: .cancel) {}
@@ -344,7 +344,7 @@ struct VolumeCapacityCard: View {
                 Spacer()
 
                 if volume.totalCapacity > 0 {
-                    Text("\(ByteCountFormatter.string(fromByteCount: volume.usedSpace, countStyle: .file)) of \(ByteCountFormatter.string(fromByteCount: volume.totalCapacity, countStyle: .file)) used")
+                    Text("\(SquirrelFormatters.formatPrecise(volume.usedSpace)) of \(SquirrelFormatters.formatExactSingle(volume.totalCapacity)) used")
                         .font(.system(size: 13, weight: .regular))
                         .foregroundColor(.secondary)
                 }
@@ -653,7 +653,7 @@ struct OpportunitiesSummaryCard: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
 
-                Text(ByteCountFormatter.string(fromByteCount: safeToCleanBytes, countStyle: .file))
+                Text(SquirrelFormatters.formatPrecise(safeToCleanBytes))
                     .font(.system(size: 24, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundColor(safeToCleanBytes > 0 ? .green : .secondary)
             }
@@ -665,7 +665,7 @@ struct OpportunitiesSummaryCard: View {
                     Button(action: onCleanSafely) {
                         HStack(spacing: 6) {
                             Image(systemName: "checkmark.circle.fill")
-                            Text("Clean Safely (\(ByteCountFormatter.string(fromByteCount: safeToCleanBytes, countStyle: .file)))")
+                            Text("Clean Safely (\(SquirrelFormatters.formatPrecise(safeToCleanBytes)))")
                         }
                     }
                     .buttonStyle(.borderedProminent)
@@ -685,7 +685,7 @@ struct OpportunitiesSummaryCard: View {
                         Button(action: onNavigateToFindings) {
                             HStack(spacing: 4) {
                                 Text("Review Recommended:")
-                                Text(ByteCountFormatter.string(fromByteCount: reviewBytes, countStyle: .file))
+                                Text(SquirrelFormatters.formatPrecise(reviewBytes))
                                     .fontWeight(.bold)
                                 Image(systemName: "chevron.right")
                                     .font(.caption2)
@@ -694,11 +694,11 @@ struct OpportunitiesSummaryCard: View {
                         .buttonStyle(.plain)
                         .foregroundColor(.accentColor)
                     } else {
-                        Text("Review Recommended: \(ByteCountFormatter.string(fromByteCount: reviewBytes, countStyle: .file))")
+                        Text("Review Recommended: \(SquirrelFormatters.formatPrecise(reviewBytes))")
                     }
 
                     Text("•")
-                    Text("Duplicates: \(ByteCountFormatter.string(fromByteCount: duplicateBytes, countStyle: .file))")
+                    Text("Duplicates: \(SquirrelFormatters.formatExactSingle(duplicateBytes))")
                 }
                 .font(.caption2.monospacedDigit())
                 .foregroundColor(.secondary)

@@ -2,8 +2,21 @@ import SwiftUI
 import AppKit
 import SquirrelCore
 
+final class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        NSApp.setActivationPolicy(.regular)
+        NSApp.activate(ignoringOtherApps: true)
+        DispatchQueue.main.async {
+            for window in NSApp.windows {
+                window.makeKeyAndOrderFront(nil)
+            }
+        }
+    }
+}
+
 @main
 public struct SquirrelApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @ObservedObject private var appState = AppState.shared
 
     public init() {}
@@ -130,7 +143,7 @@ public struct SquirrelApp: App {
                             Text(appState.volumeSpace.volumeName)
                                 .font(.system(size: 11, weight: .semibold))
                             Spacer()
-                            Text("\(ByteCountFormatter.string(fromByteCount: appState.volumeSpace.availableCapacity, countStyle: .file)) free")
+                            Text("\(SquirrelFormatters.formatExactSingle(appState.volumeSpace.availableCapacity)) free")
                                 .font(.system(size: 11).monospacedDigit())
                                 .foregroundColor(.secondary)
                         }

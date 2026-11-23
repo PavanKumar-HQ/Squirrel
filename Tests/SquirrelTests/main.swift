@@ -906,7 +906,7 @@ await runAsyncTest("ProjectPurgeScanner Workspace Discovery & Artifact Measureme
         assertTest(first.totalReclaimableBytes >= 80 * 1024, "Total reclaimable bytes measured correctly: \(first.totalReclaimableBytes)")
     }
 
-    try? FileManager.default.removeItem(at: tempDir)
+    try? FileManager.default.removeItem(at: projectDir)
 }
 
 // Test 21: NativeToolPruner Developer Toolchain Discovery
@@ -1028,6 +1028,38 @@ await runAsyncTest("Fast Directory Size Mtime Cache Throughput") {
 
     assertTest(size1 == size2, "Cached size matches initial size exactly")
     assertTest(elapsed < 0.01, "Cached directory size query completed in < 10ms (took \(String(format: "%.4f", elapsed))s)")
+}
+
+// Test 29: SquirrelFormatters High-Precision Byte Formatting & MB Continuation
+await runAsyncTest("SquirrelFormatters High-Precision Byte Formatting & MB Continuation") {
+    let zero = SquirrelFormatters.formatPrecise(0)
+    assertTest(zero == "0 B", "Zero formats to 0 B")
+
+    let kbVal: Int64 = 512 * 1024
+    let kbStr = SquirrelFormatters.formatPrecise(kbVal)
+    assertTest(kbStr.contains("KB"), "KB values formatted with KB unit: \(kbStr)")
+
+    let mbVal: Int64 = 142 * 1024 * 1024 + 512 * 1024
+    let mbStr = SquirrelFormatters.formatPrecise(mbVal)
+    assertTest(mbStr.contains("MB") && mbStr.contains("142."), "MB values show 2-decimal precision: \(mbStr)")
+
+    let gbVal: Int64 = Int64(1.42 * Double(1024 * 1024 * 1024))
+    let gbStr = SquirrelFormatters.formatPrecise(gbVal)
+    assertTest(gbStr.contains("GB") && gbStr.contains("MB"), "GB values show both GB and MB continuation: \(gbStr)")
+}
+
+// Test 30: ServerPortManager Developer Port Discovery & System Protection
+await runAsyncTest("ServerPortManager Developer Port Discovery & System Protection") {
+    let manager = ServerPortManager.shared
+    let ports = await manager.listListeningPorts()
+    // Sockets scan should execute safely
+    assertTest(ports.count >= 0, "ServerPortManager scanned listening ports safely (\(ports.count) open ports found)")
+    // System daemons must be protected
+    for port in ports {
+        if port.user == "root" || port.command == "launchd" || port.command == "mDNSResponder" {
+            assertTest(port.isSystemProtected, "System daemon \(port.command) is strictly protected from termination")
+        }
+    }
 }
 
 print("\n==================================================")

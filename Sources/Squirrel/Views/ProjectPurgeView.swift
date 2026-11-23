@@ -63,7 +63,7 @@ public struct ProjectPurgeView: View {
                     Button(role: .destructive) {
                         appState.showConfirmPurge = true
                     } label: {
-                        Text("Purge Selected (\(ByteCountFormatter.string(fromByteCount: selectedReclaimableBytes, countStyle: .file)))")
+                        Text("Purge Selected (\(SquirrelFormatters.formatPrecise(selectedReclaimableBytes)))")
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.red)
@@ -87,7 +87,7 @@ public struct ProjectPurgeView: View {
 
                 StatMetricCard(
                     title: "Purgeable Dependencies",
-                    value: ByteCountFormatter.string(fromByteCount: totalReclaimableBytes, countStyle: .file),
+                    value: SquirrelFormatters.formatPrecise(totalReclaimableBytes),
                     subtitle: "Can be reinstalled anytime",
                     iconName: "cylinder.split.1x2.fill",
                     tintColor: SquirrelTheme.color(for: .projectArtifacts)
@@ -96,7 +96,7 @@ public struct ProjectPurgeView: View {
                 StatMetricCard(
                     title: "Selected for Purge",
                     value: "\(appState.selectedProjectPaths.count) projects",
-                    subtitle: ByteCountFormatter.string(fromByteCount: selectedReclaimableBytes, countStyle: .file),
+                    subtitle: SquirrelFormatters.formatPrecise(selectedReclaimableBytes),
                     iconName: "checkmark.circle.fill",
                     tintColor: .orange
                 )
@@ -261,7 +261,7 @@ struct ProjectRowView: View {
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 2) {
-                    Text(ByteCountFormatter.string(fromByteCount: project.totalReclaimableBytes, countStyle: .file))
+                    Text(SquirrelFormatters.formatPrecise(project.totalReclaimableBytes))
                         .font(.system(size: 14, weight: .bold).monospacedDigit())
                         .foregroundColor(SquirrelTheme.color(for: .projectArtifacts))
 
@@ -294,7 +294,7 @@ struct ProjectRowView: View {
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary)
                         }
-                        Text(ByteCountFormatter.string(fromByteCount: artifact.sizeBytes, countStyle: .file))
+                        Text(SquirrelFormatters.formatPrecise(artifact.sizeBytes))
                             .font(.system(size: 12, weight: .semibold).monospacedDigit())
                             .foregroundColor(.primary)
                     }

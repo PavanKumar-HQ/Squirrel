@@ -69,7 +69,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     @Published public var isAuditingHub: Bool = false
     @Published public var hubAuditProgress: String = ""
     @Published public var hubSearchQuery: String = ""
-    @Published public var expandedHubCategories: Set<CleanGroupCategory> = [.developerTools, .systemData]
+    @Published public var expandedHubCategories: Set<CleanGroupCategory> = Set(CleanGroupCategory.allCases)
     @Published public var showHubConfirmClean: Bool = false
     @Published public var showCleanSafelyConfirm: Bool = false
     @Published public var lastCleanResult: CleanResultFeedback? = nil
@@ -80,6 +80,15 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     @Published public var findingSearchText: String = ""
     @Published public var expandedFindingId: UUID? = nil
     @Published public var selectedHistoryTab: Int = 0
+
+    // Live Real-Time Cleaning State
+    @Published public var isCleaningHub: Bool = false
+    @Published public var liveCleaningItemName: String = ""
+    @Published public var liveCleaningPath: String = ""
+    @Published public var liveCleanedBytes: Int64 = 0
+    @Published public var liveTotalToCleanBytes: Int64 = 0
+    @Published public var liveCleanedCount: Int = 0
+    @Published public var liveTotalCount: Int = 0
 
     // Volume metrics
     @Published public var volumeSpace: VolumeSpace = VolumeSpace.querySystemVolume()
@@ -211,6 +220,8 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         refreshTools()
         refreshSnapshots()
         loadMaintenanceTasks()
+        refreshListeningPorts()
+        performHubAudit()
     }
 
     public func refreshFolderAccess() {
@@ -929,6 +940,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
             }
 
             self.readyToCleanSummary = summary
+            self.expandedHubCategories = Set(CleanGroupCategory.allCases)
             self.isAuditingHub = false
             self.hubAuditProgress = ""
             self.refreshVolumeMetrics()
@@ -938,6 +950,18 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     public func cleanSelectedHubItems() async {
         let initialSpace = VolumeSpace.querySystemVolume()
         let selected = readyToCleanSummary.items.filter { $0.isSelected }
+        guard !selected.isEmpty else { return }
+
+        await MainActor.run {
+            self.isCleaningHub = true
+            self.liveCleanedBytes = 0
+            self.liveTotalToCleanBytes = selected.reduce(0) { $0 + $1.sizeBytes }
+            self.liveCleanedCount = 0
+            self.liveTotalCount = selected.count
+            self.liveCleaningItemName = "Preparing..."
+            self.liveCleaningPath = ""
+        }
+
         var cleanedCount = 0
         var skippedCount = 0
         var skippedReasons: [String] = []
@@ -945,6 +969,11 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         let safetyGuard = ProcessSafetyGuard.shared
 
         for item in selected {
+            await MainActor.run {
+                self.liveCleaningItemName = item.name
+                self.liveCleaningPath = item.path
+            }
+
             // Step 1: Pre-flight safety validation (prevents TOCTOU, symlinks, downloads, WAL journals)
             if item.category != .systemData || !item.name.starts(with: "APFS Snapshot:") {
                 let outcome = SafetyValidator.validate(path: item.path)
@@ -967,11 +996,11 @@ public final class AppState: ObservableObject, @unchecked Sendable {
             }
 
             // Step 3: Action execution (Snapshots via tmutil, files via macOS Trash)
+            var itemCleaned = false
             if item.category == .systemData && item.name.starts(with: "APFS Snapshot:") {
                 let success = await snapshotManager.deleteSnapshot(LocalSnapshot(name: item.name, dateString: item.path, isTimeMachine: true))
                 if success {
-                    cleanedCount += 1
-                    itemsActuallyCleaned.append(item)
+                    itemCleaned = true
                 } else {
                     skippedCount += 1
                     skippedReasons.append("APFS Snapshot deletion requires elevated administrator privileges.")
@@ -981,25 +1010,43 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 var resultingURL: NSURL?
                 do {
                     try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
-                    cleanedCount += 1
-                    itemsActuallyCleaned.append(item)
+                    itemCleaned = true
                 } catch {
                     skippedCount += 1
                     skippedReasons.append("\(item.name) could not be moved to Trash: \(error.localizedDescription)")
                 }
             }
+
+            if itemCleaned {
+                cleanedCount += 1
+                itemsActuallyCleaned.append(item)
+                let itemSize = item.sizeBytes
+
+                // Real-time update: decrement item from UI and increment live counter!
+                await MainActor.run {
+                    self.liveCleanedBytes += itemSize
+                    self.liveCleanedCount = cleanedCount
+                    self.readyToCleanSummary.items.removeAll { $0.id == item.id }
+                }
+
+                // Smooth pacing (50ms) so user can visibly see live animated counter and scanning globe in real time
+                try? await Task.sleep(nanoseconds: 50_000_000)
+            }
         }
 
         let postSpace = VolumeSpace.querySystemVolume()
         let verifiedReclaimed = max(0, postSpace.availableCapacity - initialSpace.availableCapacity)
+        let totalCalculated = itemsActuallyCleaned.reduce(0) { $0 + $1.sizeBytes }
+        let finalReclaimed = verifiedReclaimed > 0 ? verifiedReclaimed : totalCalculated
         let feedback = CleanResultFeedback(
-            reclaimedBytes: verifiedReclaimed > 0 ? verifiedReclaimed : itemsActuallyCleaned.reduce(0) { $0 + $1.sizeBytes },
+            reclaimedBytes: finalReclaimed,
             itemsCleanedCount: cleanedCount,
             itemsSkippedCount: skippedCount,
             skippedReasons: skippedReasons
         )
 
         await MainActor.run {
+            self.isCleaningHub = false
             LicenseManager.shared.recordReclaimedBytes(feedback.reclaimedBytes)
             self.refreshLicenseState()
             self.lastCleanResult = feedback
