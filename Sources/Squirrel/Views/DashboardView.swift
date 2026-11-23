@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import SquirrelCore
 
 public struct DashboardView: View {
@@ -10,29 +11,29 @@ public struct DashboardView: View {
 
     public var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 20) {
-                // 1. Top Section: Hero Header & Target Bar
+            VStack(alignment: .leading, spacing: 18) {
+                // 1. Clean Top Header
                 HStack(alignment: .center, spacing: 14) {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("Storage Overview")
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Dashboard")
                             .font(.system(size: 22, weight: .bold))
-                        Text("Accurate APFS volume analytics, evidence-based recommendations, and space breakdown.")
+                        Text("\(appState.volumeSpace.volumeName) — \(SquirrelFormatters.formatAppleDecimalCompact(appState.volumeSpace.usedSpace)) of \(SquirrelFormatters.formatAppleDecimalCompact(appState.volumeSpace.totalCapacity)) used")
                             .font(.subheadline)
                             .foregroundColor(.secondary)
                     }
 
                     Spacer()
 
-                    // Native Target Indicator Pill
-                    HStack(spacing: 8) {
+                    // Target Scope Pill
+                    HStack(spacing: 6) {
                         Image(systemName: "folder.fill")
-                            .font(.system(size: 13))
+                            .font(.system(size: 11))
                             .foregroundColor(.accentColor)
                         Text(appState.scanTargetDescription)
-                            .font(.system(size: 12, weight: .medium))
+                            .font(.system(size: 11, weight: .medium))
                             .lineLimit(1)
                             .truncationMode(.middle)
-                            .frame(maxWidth: 240)
+                            .frame(maxWidth: 220)
 
                         Button("Change...") {
                             appState.selectCustomFolderAndScan()
@@ -45,228 +46,159 @@ public struct DashboardView: View {
                     .padding(.vertical, 5)
                     .background(Color(NSColor.controlBackgroundColor))
                     .cornerRadius(8)
-                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.1), lineWidth: 0.8))
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(Color.primary.opacity(0.08), lineWidth: 0.8))
                 }
 
-                // 2. Volume Capacity Card
+                // 2. Real-Time Active Cleaning Indicator (Visible when clearing up)
+                if appState.isCleaning {
+                    NativeDeleteEffectView(
+                        currentItem: appState.liveCleaningItemName,
+                        cleanedBytes: appState.liveCleanedBytes,
+                        totalBytes: appState.liveTotalToCleanBytes,
+                        cleanedCount: appState.liveCleanedCount,
+                        totalCount: appState.liveTotalCount
+                    )
+                }
+
+                // 3. Cleanup Completion Feedback Banner
+                if appState.showCleanResultBanner, let result = appState.lastCleanResult {
+                    HStack(alignment: .center, spacing: 12) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(.green)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Clean Complete: Freed \(SquirrelFormatters.formatAppleDecimalCompact(result.reclaimedBytes))")
+                                .font(.system(size: 13, weight: .bold))
+                                .foregroundColor(.primary)
+
+                            Text("\(result.itemsCleanedCount) items permanently removed. APFS storage refreshed.")
+                                .font(.system(size: 11))
+                                .foregroundColor(.secondary)
+                        }
+
+                        Spacer()
+
+                        Button {
+                            appState.showCleanResultBanner = false
+                        } label: {
+                            Image(systemName: "xmark")
+                                .font(.system(size: 10, weight: .bold))
+                                .foregroundColor(.secondary)
+                        }
+                        .buttonStyle(.plain)
+                    }
+                    .padding(12)
+                    .background(Color.green.opacity(0.1))
+                    .cornerRadius(10)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.green.opacity(0.25), lineWidth: 1)
+                    )
+                }
+
+                // 4. Hero Storage Volume Capacity Card
                 VolumeCapacityCard(
                     volume: appState.volumeSpace,
-                    scanTargetDescription: appState.scanTargetDescription,
-                    lastScanDate: appState.lastScanDate,
                     scanStatus: appState.scanStatus,
-                    onScanStandard: {
+                    onScan: {
                         appState.startScan()
-                    },
-                    onSelectFolder: {
-                        appState.selectCustomFolderAndScan()
                     },
                     onCancel: {
                         appState.cancelScan()
                     }
                 )
 
-                // 3. Scan Progress (Active Traversal)
+                // 5. Active Scan Progress Card
                 if appState.scanStatus == .scanning {
-                    ScanProgressCard(progress: appState.scanProgress, onCancel: {
-                        appState.cancelScan()
-                    })
+                    HStack(spacing: 12) {
+                        NativeScanEffectView(
+                            title: "Scanning Storage...",
+                            subtitle: "\(appState.scanProgress.itemsScannedCount) items indexed (\(SquirrelFormatters.formatPrecise(appState.scanProgress.bytesScannedTotal)))"
+                        )
+
+                        Spacer()
+
+                        Button("Stop", role: .destructive) {
+                            appState.cancelScan()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    .padding(12)
+                    .solidCard(cornerRadius: 10)
                 }
 
-                // Incomplete / Cancelled Notification Banner
+                // Scan Cancelled Banner
                 if appState.scanStatus == .cancelled {
-                    ScanCancelledCard()
+                    HStack(spacing: 12) {
+                        Image(systemName: "exclamationmark.octagon.fill")
+                            .font(.system(size: 18))
+                            .foregroundColor(.orange)
+
+                        Text("Scan cancelled by user. Partial results are displayed below.")
+                            .font(.subheadline)
+                            .foregroundColor(.secondary)
+
+                        Spacer()
+                    }
+                    .padding(12)
+                    .background(Color.orange.opacity(0.1))
+                    .cornerRadius(8)
                 }
 
-                // 4. Opportunities Summary & Action Banner
+                // 6. Action Opportunities Summary (Clean Hero)
                 if appState.scanStatus == .completed {
-                    OpportunitiesSummaryCard(
+                    CleanActionSummaryCard(
                         safeToCleanBytes: appState.safeToCleanBytes,
                         reviewBytes: appState.reviewRecommendedBytes,
                         duplicateBytes: appState.duplicatePotentialReclaimBytes,
-                        onCleanSafely: {
+                        isCleaning: appState.isCleaning,
+                        onCleanNow: {
                             appState.showCleanSafelyConfirm = true
                         },
                         onNavigateToFindings: {
-                            appState.selectedFindingFilterIndex = 2 // Switch to Review filter
+                            appState.selectedFindingFilterIndex = 2 // Review filter
                             appState.selectedSection = .findings
+                        },
+                        onNavigateToDuplicates: {
+                            appState.selectedSection = .duplicates
                         }
                     )
                 }
 
-                // High-Yield Developer & System Clean Shortcuts
-                HStack(spacing: 12) {
-                    Button {
-                        appState.selectedSection = .projectPurge
-                    } label: {
-                        HStack(spacing: 10) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(SquirrelTheme.color(for: .projectArtifacts).opacity(0.15))
-                                    .frame(width: 32, height: 32)
-                                Image(systemName: "shippingbox.fill")
-                                    .foregroundColor(SquirrelTheme.color(for: .projectArtifacts))
-                                    .font(.system(size: 15))
-                            }
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Project Purge")
-                                    .font(.system(size: 12, weight: .semibold))
-                                Text("Purge node_modules, target, .venv")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(10)
-                        .solidCard(cornerRadius: 8)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        appState.selectedSection = .nativeTools
-                    } label: {
-                        HStack(spacing: 10) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(SquirrelTheme.color(for: .developerCaches).opacity(0.15))
-                                    .frame(width: 32, height: 32)
-                                Image(systemName: "hammer.fill")
-                                    .foregroundColor(SquirrelTheme.color(for: .developerCaches))
-                                    .font(.system(size: 15))
-                            }
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("Developer Tools")
-                                    .font(.system(size: 12, weight: .semibold))
-                                Text("Homebrew, Docker, pnpm, pip")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(10)
-                        .solidCard(cornerRadius: 8)
-                    }
-                    .buttonStyle(.plain)
-
-                    Button {
-                        appState.selectedSection = .apfsSnapshots
-                    } label: {
-                        HStack(spacing: 10) {
-                            ZStack {
-                                RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                    .fill(Color.purple.opacity(0.15))
-                                    .frame(width: 32, height: 32)
-                                Image(systemName: "camera.metering.matrix")
-                                    .foregroundColor(.purple)
-                                    .font(.system(size: 15))
-                            }
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("APFS Snapshots")
-                                    .font(.system(size: 12, weight: .semibold))
-                                Text("Time Machine local snapshots")
-                                    .font(.system(size: 10))
-                                    .foregroundColor(.secondary)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.right")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary)
-                        }
-                        .padding(10)
-                        .solidCard(cornerRadius: 8)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                // 5. Storage Distribution Breakdown Bar (Fast, zero-lag overview)
-                VStack(alignment: .leading, spacing: 10) {
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Storage Distribution")
-                                .font(.title3.weight(.bold))
-                            Text("Disk space allocation by category from current scan.")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                        }
-
-                        Spacer()
-
-                        if !appState.scannedItems.isEmpty {
-                            Button(action: {
-                                appState.selectedSection = .treemap
-                            }) {
-                                HStack(spacing: 4) {
-                                    Text("Open Interactive Treemap")
-                                    Image(systemName: "arrow.right")
-                                }
-                                .font(.caption.weight(.medium))
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundColor(.accentColor)
-                        }
-                    }
-
-                    if appState.scannedItems.isEmpty {
-                        ZStack {
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .fill(Color(NSColor.controlBackgroundColor))
-                                .frame(height: 140)
-
-                            VStack(spacing: 10) {
-                                Image(systemName: "square.grid.3x3.topleft.filled")
-                                    .font(.system(size: 32))
-                                    .foregroundColor(.secondary.opacity(0.7))
-                                Text("No Scan Data Available")
-                                    .font(.headline)
-                                Text("Run a scan on standard folders or choose a custom directory above.")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 10, style: .continuous)
-                                .stroke(Color.primary.opacity(0.06), lineWidth: 1)
-                        )
-                    } else {
-                        StorageCategoryBreakdownBar(appState: appState)
-                    }
-                }
-
-                // 6. Top Cleanup Opportunities Preview
+                // 7. Top Cleanup Opportunities Preview (Streamlined, minimal)
                 if !appState.findings.isEmpty {
                     VStack(alignment: .leading, spacing: 10) {
                         HStack {
                             Text("Top Cleanup Opportunities")
-                                .font(.title3.weight(.bold))
+                                .font(.system(size: 14, weight: .bold))
+
                             Spacer()
+
                             Button("View All (\(appState.findings.count))") {
                                 appState.selectedSection = .findings
                             }
                             .buttonStyle(.plain)
-                            .font(.caption.weight(.medium))
+                            .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.accentColor)
                         }
 
-                        VStack(spacing: 8) {
-                            ForEach(appState.findings.prefix(5)) { finding in
+                        VStack(spacing: 6) {
+                            ForEach(Array(appState.findings.prefix(4))) { finding in
                                 HStack(spacing: 12) {
                                     Image(systemName: finding.category.iconName)
-                                        .font(.system(size: 16))
+                                        .font(.system(size: 14))
                                         .foregroundColor(SquirrelTheme.color(for: finding.category))
-                                        .frame(width: 28, height: 28)
+                                        .frame(width: 26, height: 26)
                                         .background(SquirrelTheme.color(for: finding.category).opacity(0.12))
                                         .cornerRadius(6)
 
                                     VStack(alignment: .leading, spacing: 2) {
                                         Text(finding.title)
-                                            .font(.body.weight(.medium))
+                                            .font(.system(size: 12, weight: .medium))
                                         Text(finding.path)
-                                            .font(.caption2)
+                                            .font(.system(size: 10))
                                             .foregroundColor(.secondary)
                                             .lineLimit(1)
                                             .truncationMode(.middle)
@@ -278,17 +210,17 @@ public struct DashboardView: View {
                                         NSWorkspace.shared.selectFile(finding.path, inFileViewerRootedAtPath: "")
                                     }) {
                                         Image(systemName: "arrow.up.right.square")
-                                            .font(.system(size: 13))
+                                            .font(.system(size: 12))
                                             .foregroundColor(.secondary)
                                     }
                                     .buttonStyle(.plain)
                                     .help("Reveal in Finder")
 
                                     Text(ByteCountFormatter.string(fromByteCount: finding.allocatedSize, countStyle: .file))
-                                        .font(.subheadline.weight(.semibold).monospacedDigit())
+                                        .font(.system(size: 12, weight: .semibold).monospacedDigit())
 
-                                    Text(finding.eligibility.rawValue)
-                                        .font(.system(size: 10, weight: .bold))
+                                    Text(finding.eligibility == .safeToClean ? "Safe" : "Review")
+                                        .font(.system(size: 9, weight: .bold))
                                         .padding(.horizontal, 6)
                                         .padding(.vertical, 2)
                                         .background(
@@ -304,161 +236,124 @@ public struct DashboardView: View {
                     }
                 }
             }
-            .padding(20)
+            .padding(22)
         }
         .confirmationDialog(
-            "Execute Safe Cleanup?",
+            "Clean Safe Items?",
             isPresented: Binding(
                 get: { appState.showCleanSafelyConfirm },
                 set: { appState.showCleanSafelyConfirm = $0 }
             ),
             titleVisibility: .visible
         ) {
-            Button("Clean Safely (\(SquirrelFormatters.formatPrecise(appState.safeToCleanBytes)))", role: .destructive) {
+            Button("Clean \(SquirrelFormatters.formatAppleDecimalCompact(appState.safeToCleanBytes))", role: .destructive) {
                 appState.executeSafeBatch()
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("Only allowlisted items meeting strict safety criteria (inactive caches and old diagnostic logs) will be processed. Eligible items will be moved to managed quarantine or Trash.")
+            Text("Verified non-essential build caches and old diagnostic logs will be permanently deleted to immediately free up APFS disk space.")
         }
     }
 }
 
 // MARK: - Subcomponents
-struct VolumeCapacityCard: View {
+private struct VolumeCapacityCard: View {
     let volume: VolumeSpace
-    let scanTargetDescription: String
-    let lastScanDate: Date?
     let scanStatus: ScanStatus
-    let onScanStandard: () -> Void
-    let onSelectFolder: () -> Void
+    let onScan: () -> Void
     let onCancel: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            // Header matching macOS System Settings > General > Storage
+        VStack(alignment: .leading, spacing: 12) {
+            // Header matching macOS System Settings
             HStack(alignment: .firstTextBaseline) {
                 Text(volume.volumeName)
-                    .font(.system(size: 16, weight: .bold))
+                    .font(.system(size: 15, weight: .bold))
 
                 Spacer()
 
                 if volume.totalCapacity > 0 {
-                    Text("\(SquirrelFormatters.formatAppleDecimalCompact(volume.usedSpace)) of \(SquirrelFormatters.formatAppleDecimalCompact(volume.totalCapacity)) used")
-                        .font(.system(size: 13, weight: .regular))
+                    Text("\(SquirrelFormatters.formatAppleDecimalCompact(volume.usedSpace)) used of \(SquirrelFormatters.formatAppleDecimalCompact(volume.totalCapacity))")
+                        .font(.system(size: 12))
                         .foregroundColor(.secondary)
                 }
             }
 
-            if volume.totalCapacity == 0 {
-                HStack(spacing: 8) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundColor(.orange)
-                    Text("Volume storage capacity is currently unavailable from macOS filesystem APIs.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .padding(10)
-                .background(Color.orange.opacity(0.1))
-                .cornerRadius(8)
-            } else {
+            if volume.totalCapacity > 0 {
                 let total = Double(max(1, volume.totalCapacity))
                 let availableStr = "\(SquirrelFormatters.formatAppleDecimalCompact(volume.availableCapacity)) available"
 
-                // Segmented Storage Bar matching Apple System Settings
+                // Apple-Style Segmented Bar
                 GeometryReader { geo in
                     let width = geo.size.width
 
                     ZStack(alignment: .leading) {
-                        // Empty/Available Track (Dark Gray)
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        // Background Track
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
                             .fill(Color.secondary.opacity(0.18))
-                            .frame(height: 18)
+                            .frame(height: 16)
 
-                        // Categorized segments
+                        // Segmented bar
                         if let categories = volume.auditReport?.categories, !categories.isEmpty {
                             HStack(spacing: 0.8) {
                                 ForEach(categories) { cat in
                                     let segWidth = max(2.0, CGFloat(Double(cat.measuredBytes) / total * Double(width)))
                                     RoundedRectangle(cornerRadius: 2, style: .continuous)
                                         .fill(Color(hex: cat.colorHex) ?? Color.gray)
-                                        .frame(width: segWidth, height: 18)
+                                        .frame(width: segWidth, height: 16)
                                 }
                             }
                         } else {
                             let fractionUsed = Double(volume.usedSpace) / total
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                            RoundedRectangle(cornerRadius: 5, style: .continuous)
                                 .fill(Color.accentColor)
-                                .frame(width: max(4, CGFloat(fractionUsed * Double(width))), height: 18)
+                                .frame(width: max(4, CGFloat(fractionUsed * Double(width))), height: 16)
                         }
 
-                        // Centered Available Storage Label inside track
+                        // Available Label on right
                         HStack {
                             Spacer()
                             Text(availableStr)
-                                .font(.system(size: 11, weight: .bold).monospacedDigit())
+                                .font(.system(size: 10, weight: .bold).monospacedDigit())
                                 .foregroundColor(.primary.opacity(0.85))
-                                .shadow(color: Color.black.opacity(0.4), radius: 1, x: 0, y: 1)
-                                .padding(.trailing, 14)
+                                .padding(.trailing, 10)
                         }
                     }
                 }
-                .frame(height: 18)
+                .frame(height: 16)
 
-                // Native Apple Legend Row
-                HStack(spacing: 14) {
+                // Clean Legend Row
+                HStack(spacing: 12) {
                     if let categories = volume.auditReport?.categories, !categories.isEmpty {
                         ForEach(categories) { cat in
                             HStack(spacing: 4) {
                                 Circle()
                                     .fill(Color(hex: cat.colorHex) ?? Color.gray)
-                                    .frame(width: 7, height: 7)
+                                    .frame(width: 6, height: 6)
                                 Text(cat.categoryName)
                                     .font(.system(size: 11, weight: .medium))
                             }
-                            .help("\(cat.categoryName): \(ByteCountFormatter.string(fromByteCount: cat.measuredBytes, countStyle: .file))\n\(cat.observationNotes)")
                         }
                     } else {
                         HStack(spacing: 4) {
-                            Circle().fill(Color.accentColor).frame(width: 7, height: 7)
+                            Circle().fill(Color.accentColor).frame(width: 6, height: 6)
                             Text("Used").font(.system(size: 11))
                         }
                         HStack(spacing: 4) {
-                            Circle().fill(Color.secondary.opacity(0.4)).frame(width: 7, height: 7)
+                            Circle().fill(Color.secondary.opacity(0.4)).frame(width: 6, height: 6)
                             Text("Available").font(.system(size: 11)).foregroundColor(.secondary)
                         }
                     }
                 }
-                .padding(.top, 2)
 
                 Divider()
                     .padding(.vertical, 2)
 
-                // Actions and APFS Metadata row
+                // Card Footer: Clean Status & Single Primary Action
                 HStack(alignment: .center) {
-                    VStack(alignment: .leading, spacing: 2) {
-                        if volume.purgeableSpace > 0 {
-                            HStack(spacing: 4) {
-                                Image(systemName: "info.circle")
-                                    .font(.caption2)
-                                Text("Matches Apple System Settings: \(SquirrelFormatters.formatAppleDecimalCompact(volume.usedSpace)) used • \(SquirrelFormatters.formatAppleDecimalCompact(volume.availableCapacity)) available (includes \(SquirrelFormatters.formatAppleDecimalCompact(volume.purgeableSpace)) APFS purgeable)")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-
-                        HStack(spacing: 6) {
-                            Text("Source: Foundation URLResourceValues (APFS)")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-
-                            if let date = lastScanDate {
-                                Text("• Last Scan: \(date.formatted(date: .abbreviated, time: .shortened))")
-                                    .font(.caption2)
-                                    .foregroundColor(.secondary)
-                            }
-                        }
-                    }
+                    Text("Matches Apple System Settings Storage (\(SquirrelFormatters.formatAppleDecimalCompact(volume.availableCapacity)) available)")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
 
                     Spacer()
 
@@ -472,228 +367,110 @@ struct VolumeCapacityCard: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
                     } else {
-                        HStack(spacing: 8) {
-                            Button(action: onSelectFolder) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "folder.badge.gearshape")
-                                    Text("Choose Folder...")
-                                }
+                        Button(action: onScan) {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                Text(scanStatus == .completed ? "Scan Again" : "Scan Mac")
                             }
-                            .buttonStyle(.bordered)
-                            .controlSize(.small)
-
-                            Button(action: onScanStandard) {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "arrow.triangle.2.circlepath")
-                                    Text("Scan Standard")
-                                }
-                            }
-                            .buttonStyle(.borderedProminent)
-                            .controlSize(.small)
                         }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
                     }
                 }
             }
         }
-        .padding(16)
+        .padding(14)
         .solidCard(cornerRadius: 12)
     }
 }
 
-struct StorageCategoryBreakdownBar: View {
-    @ObservedObject var appState: AppState
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            let categoryTotals = computeCategoryTotals()
-            let totalScanned = categoryTotals.values.reduce(0, +)
-
-            if totalScanned > 0 {
-                // Segmented visual bar
-                GeometryReader { geo in
-                    HStack(spacing: 2) {
-                        ForEach(StorageCategory.allCases, id: \.self) { cat in
-                            let catBytes = categoryTotals[cat] ?? 0
-                            if catBytes > 0 {
-                                let width = max(4, geo.size.width * CGFloat(Double(catBytes) / Double(totalScanned)))
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(SquirrelTheme.color(for: cat))
-                                    .frame(width: width, height: 14)
-                            }
-                        }
-                    }
-                }
-                .frame(height: 14)
-
-                // Category legend chips
-                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150), spacing: 10)], spacing: 8) {
-                    ForEach(StorageCategory.allCases, id: \.self) { cat in
-                        let catBytes = categoryTotals[cat] ?? 0
-                        if catBytes > 0 {
-                            HStack(spacing: 6) {
-                                Circle()
-                                    .fill(SquirrelTheme.color(for: cat))
-                                    .frame(width: 8, height: 8)
-                                Text(cat.rawValue)
-                                    .font(.system(size: 11, weight: .medium))
-                                    .lineLimit(1)
-                                Spacer()
-                                Text(ByteCountFormatter.string(fromByteCount: catBytes, countStyle: .file))
-                                    .font(.system(size: 11).monospacedDigit())
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Color(NSColor.controlBackgroundColor))
-                            .cornerRadius(6)
-                        }
-                    }
-                }
-            } else {
-                Text("No categorized items discovered in current scan.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-        }
-        .padding(14)
-        .solidCard(cornerRadius: 10)
-    }
-
-    private func computeCategoryTotals() -> [StorageCategory: Int64] {
-        var totals: [StorageCategory: Int64] = [:]
-        for item in appState.scannedItems {
-            let cat = determineCategory(for: item)
-            totals[cat, default: 0] += item.allocatedSize
-        }
-        return totals
-    }
-
-    private func determineCategory(for item: StorageItem) -> StorageCategory {
-        return ClassificationRules.shared.determineCategory(for: item)
-    }
-}
-
-struct ScanProgressCard: View {
-    let progress: ScanProgress
-    let onCancel: () -> Void
-
-    var body: some View {
-        HStack(spacing: 12) {
-            NativeScanEffectView(
-                title: "Analyzing Storage...",
-                subtitle: "\(progress.itemsScannedCount) items discovered (\(SquirrelFormatters.formatPrecise(progress.bytesScannedTotal)))"
-            )
-
-            Spacer()
-
-            Button("Cancel", action: onCancel)
-                .buttonStyle(.plain)
-                .font(.caption.weight(.semibold))
-                .foregroundColor(.red)
-        }
-        .padding(10)
-        .solidCard(cornerRadius: 8)
-    }
-}
-
-struct ScanCancelledCard: View {
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "exclamationmark.octagon.fill")
-                .font(.system(size: 20))
-                .foregroundColor(.orange)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Scan Incomplete (Cancelled by User)")
-                    .font(.subheadline.weight(.semibold))
-                    .foregroundColor(.primary)
-                Text("Traversal was interrupted before all folders were indexed. Findings reflect partial traversal only, and cleanup actions are withheld until a complete scan finishes.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            Spacer()
-        }
-        .padding(12)
-        .background(Color.orange.opacity(0.12))
-        .cornerRadius(8)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.orange.opacity(0.3), lineWidth: 1)
-        )
-    }
-}
-
-struct OpportunitiesSummaryCard: View {
+private struct CleanActionSummaryCard: View {
     let safeToCleanBytes: Int64
     let reviewBytes: Int64
     let duplicateBytes: Int64
-    let onCleanSafely: () -> Void
+    let isCleaning: Bool
+    let onCleanNow: () -> Void
     let onNavigateToFindings: () -> Void
+    let onNavigateToDuplicates: () -> Void
 
     var body: some View {
         HStack(spacing: 16) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.shield.fill")
-                        .foregroundColor(.green)
-                    Text("Safe Cleanup Opportunity")
-                        .font(.headline)
+                        .foregroundColor(safeToCleanBytes > 0 ? .green : .secondary)
+                    Text("Safe to Clean")
+                        .font(.system(size: 14, weight: .semibold))
                 }
 
-                Text("Validated non-essential caches and stale diagnostic logs meeting strict safety rules.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
-                Text(SquirrelFormatters.formatPrecise(safeToCleanBytes))
-                    .font(.system(size: 24, weight: .bold, design: .rounded).monospacedDigit())
+                Text(SquirrelFormatters.formatAppleDecimalCompact(safeToCleanBytes))
+                    .font(.system(size: 26, weight: .bold, design: .rounded).monospacedDigit())
                     .foregroundColor(safeToCleanBytes > 0 ? .green : .secondary)
+
+                Text("Validated non-essential caches, toolchain build outputs, and old diagnostic logs.")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
             }
 
             Spacer()
 
             VStack(alignment: .trailing, spacing: 8) {
                 if safeToCleanBytes > 0 {
-                    Button(action: onCleanSafely) {
+                    Button(action: onCleanNow) {
                         HStack(spacing: 6) {
-                            Image(systemName: "checkmark.circle.fill")
-                            Text("Clean Safely (\(SquirrelFormatters.formatPrecise(safeToCleanBytes)))")
+                            Image(systemName: "trash.fill")
+                            Text("Clean \(SquirrelFormatters.formatAppleDecimalCompact(safeToCleanBytes))")
+                                .fontWeight(.semibold)
                         }
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(.green)
+                    .controlSize(.regular)
+                    .disabled(isCleaning)
                 } else {
-                    Text("No Safe Batch Items Found")
-                        .font(.caption.weight(.medium))
+                    Text("All Safe Items Cleaned")
+                        .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.secondary)
-                        .padding(.horizontal, 10)
+                        .padding(.horizontal, 8)
                         .padding(.vertical, 4)
                         .background(Color.secondary.opacity(0.1))
                         .cornerRadius(6)
                 }
 
-                HStack(spacing: 12) {
+                HStack(spacing: 10) {
                     if reviewBytes > 0 {
                         Button(action: onNavigateToFindings) {
-                            HStack(spacing: 4) {
-                                Text("Review Recommended:")
-                                Text(SquirrelFormatters.formatPrecise(reviewBytes))
+                            HStack(spacing: 3) {
+                                Text("Review:")
+                                Text(SquirrelFormatters.formatAppleDecimalCompact(reviewBytes))
                                     .fontWeight(.bold)
                                 Image(systemName: "chevron.right")
-                                    .font(.caption2)
+                                    .font(.system(size: 9))
                             }
                         }
                         .buttonStyle(.plain)
+                        .font(.system(size: 11))
                         .foregroundColor(.accentColor)
-                    } else {
-                        Text("Review Recommended: \(SquirrelFormatters.formatPrecise(reviewBytes))")
                     }
 
-                    Text("•")
-                    Text("Duplicates: \(SquirrelFormatters.formatExactSingle(duplicateBytes))")
+                    if duplicateBytes > 0 {
+                        Text("•")
+                            .foregroundColor(.secondary.opacity(0.5))
+
+                        Button(action: onNavigateToDuplicates) {
+                            HStack(spacing: 3) {
+                                Text("Duplicates:")
+                                Text(SquirrelFormatters.formatAppleDecimalCompact(duplicateBytes))
+                                    .fontWeight(.bold)
+                                Image(systemName: "chevron.right")
+                                    .font(.system(size: 9))
+                            }
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 11))
+                        .foregroundColor(.accentColor)
+                    }
                 }
-                .font(.caption2.monospacedDigit())
-                .foregroundColor(.secondary)
             }
         }
         .padding(16)

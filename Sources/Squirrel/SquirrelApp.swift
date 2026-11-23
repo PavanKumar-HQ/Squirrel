@@ -204,40 +204,50 @@ public struct SquirrelApp: App {
             .toolbar {
                 ToolbarItemGroup(placement: .automatic) {
                     if appState.scanStatus == .scanning {
-                        LiquidGlassButton("Stop Scan", icon: "xmark.circle.fill", role: .destructive) {
+                        Button(role: .destructive) {
                             appState.cancelScan()
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: "xmark.circle.fill")
+                                Text("Stop Scan")
+                            }
                         }
+                        .buttonStyle(.bordered)
                     } else {
-                        LiquidGlassContainer(spacing: 6) {
+                        Menu {
+                            Button {
+                                appState.startScan()
+                            } label: {
+                                Label("Scan Standard Folders", systemImage: "sparkles")
+                            }
+                            Button {
+                                appState.scanHomeDirectory()
+                            } label: {
+                                Label("Scan Entire Home (~/)", systemImage: "house")
+                            }
+                            Divider()
+                            Button {
+                                appState.selectCustomFolderAndScan()
+                            } label: {
+                                Label("Choose Custom Folder...", systemImage: "folder.badge.plus")
+                            }
                             if !appState.authorizedFolders.isEmpty {
-                                Menu {
-                                    ForEach(appState.authorizedFolders) { folder in
-                                        Button(action: {
-                                            appState.scanAuthorizedFolder(record: folder)
-                                        }) {
-                                            Label(folder.displayName, systemImage: folder.status.iconName)
-                                        }
+                                Divider()
+                                ForEach(appState.authorizedFolders) { folder in
+                                    Button {
+                                        appState.scanAuthorizedFolder(record: folder)
+                                    } label: {
+                                        Label(folder.displayName, systemImage: folder.status.iconName)
                                     }
-                                    Divider()
-                                    Button(action: {
-                                        appState.selectedSection = .folderAccess
-                                    }) {
-                                        Label("Manage Authorized Folders...", systemImage: "gearshape")
-                                    }
-                                } label: {
-                                    Label("Authorized Folders", systemImage: "folder.badge.checkmark")
                                 }
                             }
-                            LiquidGlassButton("Authorize Folder...", icon: "folder.badge.plus") {
-                                appState.selectCustomFolderAndScan()
-                            }
-                            LiquidGlassButton("Scan Home (~/)", icon: "house") {
-                                appState.scanHomeDirectory()
-                            }
-                            LiquidGlassButton("Scan Standard", icon: "arrow.triangle.2.circlepath", isProminent: true) {
-                                appState.startScan()
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.triangle.2.circlepath")
+                                Text("Scan Mac")
                             }
                         }
+                        .menuStyle(.borderedButton)
                     }
                 }
             }

@@ -596,7 +596,14 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     public func executeSafeBatch() {
         guard !isCleaning else { return }
         isCleaning = true
-        cleanupProgress = CleanupProgress(completedCount: 0, totalCount: 1, currentItemName: "Validating safe items...")
+        let safeItems = self.findings.filter { $0.category.isBatchCleanEligible && $0.eligibility == .safeToClean }
+        let totalBytes = safeItems.reduce(0) { $0 + $1.allocatedSize }
+
+        self.liveCleaningItemName = "Preparing clean..."
+        self.liveCleanedBytes = 0
+        self.liveTotalToCleanBytes = totalBytes
+        self.liveCleanedCount = 0
+        self.liveTotalCount = safeItems.count
 
         let currentFindings = self.findings
         let duration = self.lastScanDuration
@@ -610,6 +617,9 @@ public final class AppState: ObservableObject, @unchecked Sendable {
             ) { prog in
                 Task { @MainActor in
                     self.cleanupProgress = prog
+                    self.liveCleaningItemName = prog.currentItemName
+                    self.liveCleanedBytes = prog.bytesReclaimedSoFar
+                    self.liveCleanedCount = prog.completedCount
                 }
             }
 
@@ -621,9 +631,22 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 self.refreshVolumeMetrics()
                 self.refreshTelemetry()
 
+                // Mark clean result feedback for UI notification
+                let failedPaths = Set(summary.failedItems.keys)
+                self.findings.removeAll { f in
+                    f.category.isBatchCleanEligible && f.eligibility == .safeToClean && !failedPaths.contains(f.path)
+                }
                 let succeededPaths = Set(self.journalEntries.filter { $0.status == .success }.map { $0.originalPath })
-                self.findings.removeAll { succeededPaths.contains($0.path) }
                 self.scannedItems.removeAll { succeededPaths.contains($0.path) }
+
+                self.lastCleanResult = CleanResultFeedback(
+                    reclaimedBytes: summary.bytesSuccessfullyProcessed,
+                    itemsCleanedCount: summary.itemsSucceededCount,
+                    itemsSkippedCount: summary.itemsSkippedCount,
+                    skippedReasons: Array(summary.failedItems.values)
+                )
+                self.showCleanResultBanner = true
+
                 self.treemapRoot = TreemapEngine.buildHierarchy(from: self.scannedItems)
                 self.activeTreemapRoot = self.treemapRoot
             }
@@ -1007,13 +1030,18 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 }
             } else {
                 let url = URL(fileURLWithPath: item.path)
-                var resultingURL: NSURL?
                 do {
-                    try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
+                    // Caches, logs, and developer build items are removed directly to immediately free APFS storage
+                    if item.category == .appCaches || item.category == .developerTools || item.category == .systemData {
+                        try FileManager.default.removeItem(at: url)
+                    } else {
+                        var resultingURL: NSURL?
+                        try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
+                    }
                     itemCleaned = true
                 } catch {
                     skippedCount += 1
-                    skippedReasons.append("\(item.name) could not be moved to Trash: \(error.localizedDescription)")
+                    skippedReasons.append("\(item.name) could not be removed: \(error.localizedDescription)")
                 }
             }
 

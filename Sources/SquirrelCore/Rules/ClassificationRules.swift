@@ -49,7 +49,7 @@ public struct ClassificationRules {
                 ],
                 eligibility: .safeToClean,
                 riskLevel: .low,
-                recoveryMethod: .macOSTrash,
+                recoveryMethod: .directRemoval,
                 estimatedReclaimableBytes: item.allocatedSize,
                 consequencesExplanation: "Xcode will automatically re-index and rebuild compilation artifacts the next time you compile the project."
             )
@@ -75,7 +75,7 @@ public struct ClassificationRules {
                 ],
                 eligibility: isDeviceSupport ? .reviewRecommended : .safeToClean,
                 riskLevel: isDeviceSupport ? .medium : .low,
-                recoveryMethod: .macOSTrash,
+                recoveryMethod: isDeviceSupport ? .macOSTrash : .directRemoval,
                 estimatedReclaimableBytes: item.allocatedSize,
                 consequencesExplanation: isDeviceSupport
                     ? "Symbolic files for older iOS versions will be removed. Xcode will re-fetch symbols if you reconnect the device."
@@ -101,7 +101,7 @@ public struct ClassificationRules {
                 ],
                 eligibility: .safeToClean,
                 riskLevel: .low,
-                recoveryMethod: .macOSTrash,
+                recoveryMethod: .directRemoval,
                 estimatedReclaimableBytes: item.allocatedSize,
                 consequencesExplanation: "\(toolName) will re-download packages on next install if not already cached locally."
             )
@@ -150,7 +150,7 @@ public struct ClassificationRules {
                 ],
                 eligibility: .safeToClean,
                 riskLevel: .low,
-                recoveryMethod: .macOSTrash,
+                recoveryMethod: .directRemoval,
                 estimatedReclaimableBytes: item.allocatedSize,
                 consequencesExplanation: "Applications will regenerate necessary caches automatically when opened."
             )
@@ -203,9 +203,9 @@ public struct ClassificationRules {
                 ],
                 eligibility: eligibility,
                 riskLevel: .low,
-                recoveryMethod: .macOSTrash,
+                recoveryMethod: isOld ? .directRemoval : .macOSTrash,
                 estimatedReclaimableBytes: item.allocatedSize,
-                consequencesExplanation: "Historical diagnostic records will be moved to Trash. No application configuration or active user data is affected."
+                consequencesExplanation: "Historical diagnostic records will be cleaned directly. No application configuration or active user data is affected."
             )
         }
 
