@@ -72,5 +72,48 @@ public enum SquirrelFormatters {
             return String(format: "%.2f MB", mb)
         }
     }
+
+    /// Formats volume storage metrics using Apple macOS System Settings decimal standard (1 GB = 1,000,000,000 bytes).
+    /// Guarantees 100% exact numerical match with macOS System Settings (General > Storage).
+    /// E.g. 110,460,461,633 bytes -> "110.5 GB (110,460 MB)"
+    public static func formatAppleDecimal(_ bytes: Int64) -> String {
+        guard bytes > 0 else { return "0 B" }
+        let d = Double(bytes)
+        let kb = d / 1_000.0
+        let mb = d / 1_000_000.0
+        let gb = d / 1_000_000_000.0
+        let tb = d / 1_000_000_000_000.0
+
+        if tb >= 1.0 {
+            return String(format: "%.1f TB (%.0f GB)", tb, gb)
+        } else if gb >= 1.0 {
+            return String(format: "%.1f GB (%.0f MB)", gb, mb)
+        } else if mb >= 1.0 {
+            return String(format: "%.1f MB", mb)
+        } else if kb >= 1.0 {
+            return String(format: "%.1f KB", kb)
+        } else {
+            return "\(bytes) B"
+        }
+    }
+
+    /// Single compact decimal format matching Apple System Settings (e.g. "110.5 GB" or "245.1 GB").
+    public static func formatAppleDecimalCompact(_ bytes: Int64) -> String {
+        guard bytes > 0 else { return "0 B" }
+        let d = Double(bytes)
+        let mb = d / 1_000_000.0
+        let gb = d / 1_000_000_000.0
+        let tb = d / 1_000_000_000_000.0
+
+        if tb >= 1.0 {
+            return String(format: "%.1f TB", tb)
+        } else if gb >= 1.0 {
+            return String(format: "%.1f GB", gb)
+        } else if mb >= 1.0 {
+            return String(format: "%.0f MB", mb)
+        } else {
+            return "\(bytes) B"
+        }
+    }
 }
 

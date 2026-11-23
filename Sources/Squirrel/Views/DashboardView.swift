@@ -344,7 +344,7 @@ struct VolumeCapacityCard: View {
                 Spacer()
 
                 if volume.totalCapacity > 0 {
-                    Text("\(SquirrelFormatters.formatPrecise(volume.usedSpace)) of \(SquirrelFormatters.formatExactSingle(volume.totalCapacity)) used")
+                    Text("\(SquirrelFormatters.formatAppleDecimalCompact(volume.usedSpace)) of \(SquirrelFormatters.formatAppleDecimalCompact(volume.totalCapacity)) used")
                         .font(.system(size: 13, weight: .regular))
                         .foregroundColor(.secondary)
                 }
@@ -363,7 +363,7 @@ struct VolumeCapacityCard: View {
                 .cornerRadius(8)
             } else {
                 let total = Double(max(1, volume.totalCapacity))
-                let availableStr = ByteCountFormatter.string(fromByteCount: volume.availableCapacity, countStyle: .file)
+                let availableStr = "\(SquirrelFormatters.formatAppleDecimalCompact(volume.availableCapacity)) available"
 
                 // Segmented Storage Bar matching Apple System Settings
                 GeometryReader { geo in
@@ -441,7 +441,7 @@ struct VolumeCapacityCard: View {
                             HStack(spacing: 4) {
                                 Image(systemName: "info.circle")
                                     .font(.caption2)
-                                Text("Purgeable by APFS: \(ByteCountFormatter.string(fromByteCount: volume.purgeableSpace, countStyle: .file)) • Container allocation: \(ByteCountFormatter.string(fromByteCount: volume.rawPhysicalUsedSpace, countStyle: .file))")
+                                Text("Matches Apple System Settings: \(SquirrelFormatters.formatAppleDecimalCompact(volume.usedSpace)) used • \(SquirrelFormatters.formatAppleDecimalCompact(volume.availableCapacity)) available (includes \(SquirrelFormatters.formatAppleDecimalCompact(volume.purgeableSpace)) APFS purgeable)")
                                     .font(.caption2)
                                     .foregroundColor(.secondary)
                             }
@@ -579,18 +579,10 @@ struct ScanProgressCard: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            ProgressView()
-                .controlSize(.small)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Analyzing: \(progress.currentPath)")
-                    .font(.caption.weight(.medium))
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text("\(progress.itemsScannedCount) items discovered (\(ByteCountFormatter.string(fromByteCount: progress.bytesScannedTotal, countStyle: .file)))")
-                    .font(.caption2.monospacedDigit())
-                    .foregroundColor(.secondary)
-            }
+            NativeScanEffectView(
+                title: "Analyzing Storage...",
+                subtitle: "\(progress.itemsScannedCount) items discovered (\(SquirrelFormatters.formatPrecise(progress.bytesScannedTotal)))"
+            )
 
             Spacer()
 
@@ -599,7 +591,7 @@ struct ScanProgressCard: View {
                 .font(.caption.weight(.semibold))
                 .foregroundColor(.red)
         }
-        .padding(12)
+        .padding(10)
         .solidCard(cornerRadius: 8)
     }
 }

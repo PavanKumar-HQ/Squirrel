@@ -112,37 +112,42 @@ public actor SafeProcessRunner {
                 process.terminate()
                 break
             }
-            try? await Task.sleep(nanoseconds: 50_000_000) // 50ms check
+            try? await Task.sleep(nanoseconds: 20_000_000) // 20ms check
         }
 
         if timedOut {
-            // Give 150ms for SIGTERM, then force SIGKILL
-            for _ in 0..<3 {
+            // Give 100ms for SIGTERM, then force SIGKILL
+            for _ in 0..<5 {
                 if !process.isRunning { break }
-                try? await Task.sleep(nanoseconds: 50_000_000)
+                try? await Task.sleep(nanoseconds: 20_000_000)
             }
             if process.isRunning {
                 kill(process.processIdentifier, SIGKILL)
+                for _ in 0..<5 {
+                    if !process.isRunning { break }
+                    try? await Task.sleep(nanoseconds: 20_000_000)
+                }
             }
         }
 
-        process.waitUntilExit()
-
+        // Clean up readability handlers first to prevent deadlocks
         outPipe.fileHandleForReading.readabilityHandler = nil
         errPipe.fileHandleForReading.readabilityHandler = nil
 
-        // Drain any remaining unread bytes
-        let remainingOut = outPipe.fileHandleForReading.readDataToEndOfFile()
-        let remainingErr = errPipe.fileHandleForReading.readDataToEndOfFile()
+        // Drain any remaining non-blocking available bytes without hanging
+        let remainingOut = outPipe.fileHandleForReading.availableData
+        let remainingErr = errPipe.fileHandleForReading.availableData
 
-        stdoutBuffer.append(remainingOut)
-        stderrBuffer.append(remainingErr)
+        if !remainingOut.isEmpty { stdoutBuffer.append(remainingOut) }
+        if !remainingErr.isEmpty { stderrBuffer.append(remainingErr) }
 
         try? outPipe.fileHandleForReading.close()
         try? errPipe.fileHandleForReading.close()
 
+        let exitCode = process.isRunning ? -1 : process.terminationStatus
+
         return ProcessExecutionResult(
-            exitCode: process.terminationStatus,
+            exitCode: exitCode,
             stdout: stdoutBuffer.extractString(),
             stderr: stderrBuffer.extractString(),
             didTimeout: timedOut

@@ -63,19 +63,41 @@ public struct VolumeSpace: Codable, Sendable, Equatable {
 
     /// Queries actual volume metrics for any specified mount point or URL.
     public static func queryVolume(at url: URL) -> VolumeSpace {
-        do {
-            let values = try url.resourceValues(forKeys: [
+        // Query the volume matching the target URL, verifying against / and /System/Volumes/Data for APFS container parity
+        var total: Int64 = 0
+        var rawAvailable: Int64 = 0
+        var important: Int64 = 0
+        var opportunistic: Int64 = 0
+        var name: String = "Macintosh HD"
+
+        let candidateURLs: [URL] = [url, URL(fileURLWithPath: "/"), URL(fileURLWithPath: "/System/Volumes/Data")]
+        for cand in candidateURLs {
+            if let values = try? cand.resourceValues(forKeys: [
                 .volumeTotalCapacityKey,
                 .volumeAvailableCapacityKey,
                 .volumeAvailableCapacityForImportantUsageKey,
                 .volumeAvailableCapacityForOpportunisticUsageKey,
                 .volumeLocalizedNameKey
-            ])
-            let total = Int64(values.volumeTotalCapacity ?? 0)
-            let rawAvailable = Int64(values.volumeAvailableCapacity ?? 0)
-            let important = Int64(values.volumeAvailableCapacityForImportantUsage ?? rawAvailable)
-            let opportunistic = Int64(values.volumeAvailableCapacityForOpportunisticUsage ?? rawAvailable)
+            ]) {
+                if total == 0, let t = values.volumeTotalCapacity, t > 0 {
+                    total = Int64(t)
+                }
+                if rawAvailable == 0, let r = values.volumeAvailableCapacity, r > 0 {
+                    rawAvailable = Int64(r)
+                }
+                if important == 0, let imp = values.volumeAvailableCapacityForImportantUsage, imp > 0 {
+                    important = Int64(imp)
+                }
+                if opportunistic == 0, let opp = values.volumeAvailableCapacityForOpportunisticUsage, opp > 0 {
+                    opportunistic = Int64(opp)
+                }
+                if let n = values.volumeLocalizedName, !n.isEmpty {
+                    name = n
+                }
+            }
+        }
 
+        if total > 0 {
             // System Settings parity:
             // Available is importantAvailableCapacity (accounting for APFS purgeable files)
             // Used is Total - Available
@@ -83,7 +105,6 @@ public struct VolumeSpace: Codable, Sendable, Equatable {
             let used = max(0, total - available)
             let purgeable = max(0, important - rawAvailable)
             let rawUsed = max(0, total - rawAvailable)
-            let name = values.volumeLocalizedName ?? "Macintosh HD"
 
             return VolumeSpace(
                 totalCapacity: total,
@@ -99,9 +120,10 @@ public struct VolumeSpace: Codable, Sendable, Equatable {
                 measurementSource: "Foundation URLResourceValues (APFS)",
                 auditReport: nil
             )
-        } catch {
-            // Fallback to POSIX statvfs
-            var stats = statvfs()
+        }
+
+        // Fallback to POSIX statvfs if Foundation queries produced zero
+        var stats = statvfs()
             if statvfs(url.path, &stats) == 0 {
                 let blockSize = Int64(stats.f_frsize)
                 let total = Int64(stats.f_blocks) * blockSize
@@ -136,6 +158,5 @@ public struct VolumeSpace: Codable, Sendable, Equatable {
                 measurementSource: "Unavailable",
                 auditReport: nil
             )
-        }
     }
 }

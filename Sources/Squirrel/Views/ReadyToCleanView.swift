@@ -18,9 +18,15 @@ public struct ReadyToCleanView: View {
             // Main Scrollable Content
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
-                    // Live Real-Time Cleaning Card
+                    // Live Real-Time Cleaning Card (Native Apple HIG, zero neon, zero gradients)
                     if appState.isCleaningHub {
-                        realTimeCleaningCard
+                        NativeDeleteEffectView(
+                            currentItem: appState.liveCleaningItemName,
+                            cleanedBytes: appState.liveCleanedBytes,
+                            totalBytes: appState.liveTotalToCleanBytes,
+                            cleanedCount: appState.liveCleanedCount,
+                            totalCount: appState.liveTotalCount
+                        )
                     }
 
                     // Feedback Banner if clean recently finished
@@ -127,10 +133,17 @@ public struct ReadyToCleanView: View {
                     HStack(spacing: 8) {
                         let cleanableStr = formatted(summary.totalCleanableBytes)
                         let availableStr = formatted(appState.volumeSpace.availableCapacity + summary.totalCleanableBytes)
+                        let usedStr = SquirrelFormatters.formatAppleDecimalCompact(appState.volumeSpace.usedSpace)
 
                         Text("\(cleanableStr) cleanable")
                             .fontWeight(.bold)
                             .foregroundColor(.primary)
+
+                        Text("•")
+                            .foregroundColor(.secondary.opacity(0.6))
+
+                        Text("\(usedStr) used in System Settings")
+                            .foregroundColor(.secondary)
 
                         Text("•")
                             .foregroundColor(.secondary.opacity(0.6))
@@ -144,13 +157,10 @@ public struct ReadyToCleanView: View {
                 Spacer()
 
                 if appState.isAuditingHub {
-                    HStack(spacing: 12) {
-                        ScanningGlobeView(subtitle: appState.hubAuditProgress.isEmpty ? "Auditing system..." : appState.hubAuditProgress)
-                    }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 6)
-                    .background(Color(NSColor.controlBackgroundColor))
-                    .cornerRadius(10)
+                    NativeScanEffectView(
+                        title: "Auditing Storage...",
+                        subtitle: appState.hubAuditProgress.isEmpty ? "Auditing high-yield categories" : appState.hubAuditProgress
+                    )
                 } else {
                     HStack(spacing: 8) {
                         // System Tune-Up button (Porting Mole optimize)
@@ -600,73 +610,6 @@ public struct ReadyToCleanView: View {
         }
         .padding(24)
         .frame(minWidth: 540)
-    }
-
-    // MARK: - Real-Time Live Cleaning Card
-    private var realTimeCleaningCard: some View {
-        HStack(alignment: .center, spacing: 18) {
-            ScanningGlobeView(subtitle: "Purging...")
-                .frame(width: 52, height: 52)
-
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
-                    HStack(spacing: 6) {
-                        Circle()
-                            .fill(Color.green)
-                            .frame(width: 8, height: 8)
-                        Text("Cleaning in real time...")
-                            .font(.system(size: 15, weight: .bold))
-                            .foregroundColor(.primary)
-                    }
-
-                    Spacer()
-
-                    Text(SquirrelFormatters.formatPrecise(appState.liveCleanedBytes))
-                        .font(.system(size: 14, weight: .bold, design: .monospaced))
-                        .foregroundColor(.green)
-                    +
-                    Text(" / \(SquirrelFormatters.formatPrecise(appState.liveTotalToCleanBytes))")
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundColor(.secondary)
-                }
-
-                // Dynamic Animated Progress Bar
-                let fraction: Double = appState.liveTotalToCleanBytes > 0 ? Double(appState.liveCleanedBytes) / Double(appState.liveTotalToCleanBytes) : 0
-                GeometryReader { g in
-                    ZStack(alignment: .leading) {
-                        Capsule()
-                            .fill(Color.primary.opacity(0.08))
-                            .frame(height: 8)
-                        Capsule()
-                            .fill(LinearGradient(colors: [SquirrelTheme.brandWarm, .green], startPoint: .leading, endPoint: .trailing))
-                            .frame(width: max(8, g.size.width * CGFloat(fraction)), height: 8)
-                    }
-                }
-                .frame(height: 8)
-
-                HStack {
-                    Text(appState.liveCleaningItemName.isEmpty ? "Preparing safe purge..." : "Removing: \(appState.liveCleaningItemName)")
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundColor(.secondary)
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-
-                    Spacer()
-
-                    Text("Item \(appState.liveCleanedCount) of \(appState.liveTotalCount)")
-                        .font(.system(size: 10, weight: .medium, design: .monospaced))
-                        .foregroundColor(.secondary)
-                }
-            }
-        }
-        .padding(16)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(12)
-        .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.green.opacity(0.35), lineWidth: 1.5)
-        )
-        .shadow(color: Color.black.opacity(0.08), radius: 8, y: 3)
     }
 
     private func formatted(_ bytes: Int64) -> String {

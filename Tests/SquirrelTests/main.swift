@@ -1046,6 +1046,11 @@ await runAsyncTest("SquirrelFormatters High-Precision Byte Formatting & MB Conti
     let gbVal: Int64 = Int64(1.42 * Double(1024 * 1024 * 1024))
     let gbStr = SquirrelFormatters.formatPrecise(gbVal)
     assertTest(gbStr.contains("GB") && gbStr.contains("MB"), "GB values show both GB and MB continuation: \(gbStr)")
+
+    // Decimal Apple System Settings parity test: 110 GB
+    let apple110GB: Int64 = 110_460_000_000
+    let decStr = SquirrelFormatters.formatAppleDecimalCompact(apple110GB)
+    assertTest(decStr.contains("110"), "Apple System Settings decimal parity outputs 110 GB: \(decStr)")
 }
 
 // Test 30: ServerPortManager Developer Port Discovery & System Protection

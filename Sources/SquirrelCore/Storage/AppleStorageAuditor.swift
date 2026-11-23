@@ -111,8 +111,8 @@ public struct AppleStorageAuditor {
         diskutilProc.standardError = Pipe()
 
         if (try? diskutilProc.run()) != nil {
-            diskutilProc.waitUntilExit()
             let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            diskutilProc.waitUntilExit()
             if let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
                let containers = plist["Containers"] as? [[String: Any]] {
                 for c in containers {

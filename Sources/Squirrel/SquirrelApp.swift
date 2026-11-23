@@ -143,7 +143,7 @@ public struct SquirrelApp: App {
                             Text(appState.volumeSpace.volumeName)
                                 .font(.system(size: 11, weight: .semibold))
                             Spacer()
-                            Text("\(SquirrelFormatters.formatExactSingle(appState.volumeSpace.availableCapacity)) free")
+                            Text("\(SquirrelFormatters.formatAppleDecimalCompact(appState.volumeSpace.availableCapacity)) free")
                                 .font(.system(size: 11).monospacedDigit())
                                 .foregroundColor(.secondary)
                         }

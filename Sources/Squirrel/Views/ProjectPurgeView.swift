@@ -49,7 +49,7 @@ public struct ProjectPurgeView: View {
                 Spacer()
 
                 if appState.isScanningProjects {
-                    DevMoonScanningView(subtitle: appState.projectScanProgressText.isEmpty ? "Scanning Repositories..." : appState.projectScanProgressText)
+                    NativeScanEffectView(title: "Scanning Repositories...", subtitle: appState.projectScanProgressText.isEmpty ? "Auditing project artifacts" : appState.projectScanProgressText)
                 } else {
                     Button {
                         appState.scanProjects()
