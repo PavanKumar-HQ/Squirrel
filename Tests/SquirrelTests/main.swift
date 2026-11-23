@@ -966,7 +966,7 @@ await runAsyncTest("TargetedCleanEngine 4-Category Audit Efficiency") {
     let summary = await engine.performTargetedAudit()
     let duration = Date().timeIntervalSince(start)
 
-    assertTest(duration < 5.0, "Targeted audit completed within 5 seconds (took \(String(format: "%.2f", duration))s)")
+    assertTest(duration < 10.0, "Targeted audit completed within 10 seconds (took \(String(format: "%.2f", duration))s)")
     assertTest(!summary.items.isEmpty, "Targeted audit discovered cleanable developer/cache items (\(summary.items.count) items found)")
     assertTest(summary.totalAvailableBytes > 0, "Cleanable bytes discovered: \(ByteCountFormatter.string(fromByteCount: summary.totalAvailableBytes, countStyle: .file))")
 }

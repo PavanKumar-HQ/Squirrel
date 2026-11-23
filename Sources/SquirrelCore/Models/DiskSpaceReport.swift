@@ -63,14 +63,14 @@ public struct VolumeSpace: Codable, Sendable, Equatable {
 
     /// Queries actual volume metrics for any specified mount point or URL.
     public static func queryVolume(at url: URL) -> VolumeSpace {
-        // Query the volume matching the target URL, verifying against / and /System/Volumes/Data for APFS container parity
         var total: Int64 = 0
         var rawAvailable: Int64 = 0
         var important: Int64 = 0
         var opportunistic: Int64 = 0
         var name: String = "Macintosh HD"
 
-        let candidateURLs: [URL] = [url, URL(fileURLWithPath: "/"), URL(fileURLWithPath: "/System/Volumes/Data")]
+        // 1. Query Foundation resource values for volume metadata and APFS purgeable metrics
+        let candidateURLs: [URL] = [url, URL(fileURLWithPath: "/System/Volumes/Data"), URL(fileURLWithPath: "/")]
         for cand in candidateURLs {
             if let values = try? cand.resourceValues(forKeys: [
                 .volumeTotalCapacityKey,
@@ -97,19 +97,36 @@ public struct VolumeSpace: Codable, Sendable, Equatable {
             }
         }
 
+        // 2. Query true live physical Darwin statfs on the data volume.
+        // Darwin statfs reflects immediate unallocated block changes on deletion in real-time,
+        // avoiding Foundation NSURLResourceValues caching lags.
+        var stats = statfs()
+        let statfsTarget = (url.path == "/" || url.path.hasPrefix("/System/Volumes/Data")) ? "/System/Volumes/Data" : url.path
+        if statfs(statfsTarget, &stats) == 0 || statfs(url.path, &stats) == 0 {
+            let blockSize = Int64(stats.f_bsize)
+            let liveFree = Int64(stats.f_bavail) * blockSize
+            let liveTotal = Int64(stats.f_blocks) * blockSize
+            if liveFree > 0 {
+                rawAvailable = liveFree
+            }
+            if total == 0 && liveTotal > 0 {
+                total = liveTotal
+            }
+        }
+
         if total > 0 {
             // System Settings parity:
-            // Available is importantAvailableCapacity (accounting for APFS purgeable files)
-            // Used is Total - Available
-            let available = important > 0 ? important : rawAvailable
-            let used = max(0, total - available)
+            // Purgeable space is the APFS delta between important capacity and raw physical unallocated blocks.
+            // Live Available is the real-time physical free blocks + purgeable space.
             let purgeable = max(0, important - rawAvailable)
+            let available = rawAvailable + purgeable
+            let used = max(0, total - available)
             let rawUsed = max(0, total - rawAvailable)
 
             return VolumeSpace(
                 totalCapacity: total,
                 availableCapacity: available,
-                importantAvailableCapacity: important,
+                importantAvailableCapacity: available,
                 opportunisticAvailableCapacity: opportunistic,
                 usedSpace: used,
                 rawAvailableCapacity: rawAvailable,
@@ -117,33 +134,33 @@ public struct VolumeSpace: Codable, Sendable, Equatable {
                 purgeableSpace: purgeable,
                 volumeName: name,
                 mountPoint: url.path,
-                measurementSource: "Foundation URLResourceValues (APFS)",
+                measurementSource: "Darwin statfs & APFS Container",
                 auditReport: nil
             )
         }
 
         // Fallback to POSIX statvfs if Foundation queries produced zero
-        var stats = statvfs()
-            if statvfs(url.path, &stats) == 0 {
-                let blockSize = Int64(stats.f_frsize)
-                let total = Int64(stats.f_blocks) * blockSize
-                let free = Int64(stats.f_bavail) * blockSize
-                let used = max(0, total - free)
-                return VolumeSpace(
-                    totalCapacity: total,
-                    availableCapacity: free,
-                    importantAvailableCapacity: free,
-                    opportunisticAvailableCapacity: free,
-                    usedSpace: used,
-                    rawAvailableCapacity: free,
-                    rawPhysicalUsedSpace: used,
-                    purgeableSpace: 0,
-                    volumeName: url.lastPathComponent.isEmpty ? "Macintosh HD" : url.lastPathComponent,
-                    mountPoint: url.path,
-                    measurementSource: "Darwin POSIX statvfs",
-                    auditReport: nil
-                )
-            }
+        var vfsStats = statvfs()
+        if statvfs(url.path, &vfsStats) == 0 {
+            let blockSize = Int64(vfsStats.f_frsize)
+            let total = Int64(vfsStats.f_blocks) * blockSize
+            let free = Int64(vfsStats.f_bavail) * blockSize
+            let used = max(0, total - free)
+            return VolumeSpace(
+                totalCapacity: total,
+                availableCapacity: free,
+                importantAvailableCapacity: free,
+                opportunisticAvailableCapacity: free,
+                usedSpace: used,
+                rawAvailableCapacity: free,
+                rawPhysicalUsedSpace: used,
+                purgeableSpace: 0,
+                volumeName: url.lastPathComponent.isEmpty ? "Macintosh HD" : url.lastPathComponent,
+                mountPoint: url.path,
+                measurementSource: "Darwin POSIX statvfs",
+                auditReport: nil
+            )
+        }
             return VolumeSpace(
                 totalCapacity: 0,
                 availableCapacity: 0,

@@ -69,7 +69,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     @Published public var isAuditingHub: Bool = false
     @Published public var hubAuditProgress: String = ""
     @Published public var hubSearchQuery: String = ""
-    @Published public var expandedHubCategories: Set<CleanGroupCategory> = Set(CleanGroupCategory.allCases)
+    @Published public var expandedHubCategories: Set<CleanGroupCategory> = []
     @Published public var showHubConfirmClean: Bool = false
     @Published public var showCleanSafelyConfirm: Bool = false
     @Published public var lastCleanResult: CleanResultFeedback? = nil
@@ -623,6 +623,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 }
             }
 
+            Darwin.sync()
             await MainActor.run {
                 self.isCleaning = false
                 self.lastCleanupSummary = summary
@@ -963,7 +964,6 @@ public final class AppState: ObservableObject, @unchecked Sendable {
             }
 
             self.readyToCleanSummary = summary
-            self.expandedHubCategories = Set(CleanGroupCategory.allCases)
             self.isAuditingHub = false
             self.hubAuditProgress = ""
             self.refreshVolumeMetrics()
@@ -1033,15 +1033,40 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 do {
                     // Caches, logs, and developer build items are removed directly to immediately free APFS storage
                     if item.category == .appCaches || item.category == .developerTools || item.category == .systemData {
-                        try FileManager.default.removeItem(at: url)
+                        if item.path.hasSuffix("/Library/Logs") {
+                            let contents = (try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil)) ?? []
+                            for child in contents {
+                                try? FileManager.default.removeItem(at: child)
+                            }
+                            itemCleaned = true
+                        } else {
+                            try FileManager.default.removeItem(at: url)
+                            itemCleaned = true
+                        }
                     } else {
                         var resultingURL: NSURL?
                         try FileManager.default.trashItem(at: url, resultingItemURL: &resultingURL)
+                        itemCleaned = true
                     }
-                    itemCleaned = true
                 } catch {
-                    skippedCount += 1
-                    skippedReasons.append("\(item.name) could not be removed: \(error.localizedDescription)")
+                    // Fallback: If folder removal was blocked by permission or open handle, purge its contents
+                    if let contents = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil), !contents.isEmpty {
+                        var anyRemoved = false
+                        for child in contents {
+                            if (try? FileManager.default.removeItem(at: child)) != nil {
+                                anyRemoved = true
+                            }
+                        }
+                        if anyRemoved {
+                            itemCleaned = true
+                        } else {
+                            skippedCount += 1
+                            skippedReasons.append("\(item.name) could not be removed: \(error.localizedDescription)")
+                        }
+                    } else {
+                        skippedCount += 1
+                        skippedReasons.append("\(item.name) could not be removed: \(error.localizedDescription)")
+                    }
                 }
             }
 
@@ -1050,18 +1075,20 @@ public final class AppState: ObservableObject, @unchecked Sendable {
                 itemsActuallyCleaned.append(item)
                 let itemSize = item.sizeBytes
 
+                let currentCleanedCount = cleanedCount
                 // Real-time update: decrement item from UI and increment live counter!
                 await MainActor.run {
                     self.liveCleanedBytes += itemSize
-                    self.liveCleanedCount = cleanedCount
+                    self.liveCleanedCount = currentCleanedCount
                     self.readyToCleanSummary.items.removeAll { $0.id == item.id }
                 }
 
-                // Smooth pacing (50ms) so user can visibly see live animated counter and scanning globe in real time
+                // Smooth pacing (50ms) so user can visibly see live animated counter
                 try? await Task.sleep(nanoseconds: 50_000_000)
             }
         }
 
+        Darwin.sync()
         let postSpace = VolumeSpace.querySystemVolume()
         let verifiedReclaimed = max(0, postSpace.availableCapacity - initialSpace.availableCapacity)
         let totalCalculated = itemsActuallyCleaned.reduce(0) { $0 + $1.sizeBytes }

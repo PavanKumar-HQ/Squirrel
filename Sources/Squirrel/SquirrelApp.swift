@@ -94,39 +94,29 @@ public struct SquirrelApp: App {
                         .padding(.horizontal, 12)
                         .padding(.bottom, 6)
 
-                    // Navigation List with Dynamic Badge Counts
+                    // Navigation List Grouped by Category with Badges
                     List(selection: Binding(
                         get: { appState.selectedSection },
                         set: { newSec in if let s = newSec { appState.selectedSection = s } }
                     )) {
-                        ForEach(NavigationSection.allCases) { section in
-                            HStack {
-                                Label {
-                                    Text(section.rawValue)
-                                        .font(.system(size: 13, weight: .medium))
-                                } icon: {
-                                    Image(systemName: section.iconName)
-                                        .font(.system(size: 14))
-                                        .foregroundColor(appState.selectedSection == section ? .accentColor : .secondary)
-                                }
+                        Section("CLEANING") {
+                            sidebarRow(for: .dashboard)
+                            sidebarRow(for: .readyToClean)
+                            sidebarRow(for: .findings)
+                            sidebarRow(for: .duplicates)
+                        }
 
-                                Spacer()
+                        Section("DEVELOPER") {
+                            sidebarRow(for: .projectPurge)
+                            sidebarRow(for: .nativeTools)
+                            sidebarRow(for: .activePorts)
+                        }
 
-                                // Section Badge Counts
-                                if let count = badgeCount(for: section), count > 0 {
-                                    Text("\(count)")
-                                        .font(.system(size: 11, weight: .semibold).monospacedDigit())
-                                        .foregroundColor(section == .permissions ? .orange : (section == .findings ? .blue : .secondary))
-                                        .padding(.horizontal, 6)
-                                        .padding(.vertical, 2)
-                                        .background(
-                                            Capsule()
-                                                .fill(section == .permissions ? Color.orange.opacity(0.15) : Color.secondary.opacity(0.12))
-                                        )
-                                }
-                            }
-                            .padding(.vertical, 2)
-                            .tag(section)
+                        Section("STORAGE & SYSTEM") {
+                            sidebarRow(for: .treemap)
+                            sidebarRow(for: .apfsSnapshots)
+                            sidebarRow(for: .history)
+                            sidebarRow(for: .folderAccess)
                         }
                     }
                     .listStyle(.sidebar)
@@ -134,7 +124,7 @@ public struct SquirrelApp: App {
                     Divider()
                         .padding(.horizontal, 12)
 
-                    // Sidebar Footer: Real Volume Space Mini-Pill
+                    // Sidebar Footer: Real Volume Space & Quota Meter
                     VStack(alignment: .leading, spacing: 6) {
                         HStack(spacing: 6) {
                             Circle()
@@ -160,8 +150,41 @@ public struct SquirrelApp: App {
                             }
                         }
                         .frame(height: 5)
+
+                        // Monetization & Free Quota Meter
+                        if !appState.isPro {
+                            Divider().padding(.vertical, 2)
+                            HStack {
+                                Text("Free Clean Quota")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Text("\(SquirrelFormatters.formatAppleDecimalCompact(appState.remainingFreeBytes)) left")
+                                    .font(.system(size: 10, weight: .bold).monospacedDigit())
+                                    .foregroundColor(appState.remainingFreeBytes > 1_000_000_000 ? .primary : .orange)
+                            }
+
+                            let quotaFraction = 1.0 - (Double(appState.remainingFreeBytes) / Double(LicenseManager.freeCleaningAllowanceBytes))
+                            GeometryReader { g in
+                                ZStack(alignment: .leading) {
+                                    Capsule().fill(Color.secondary.opacity(0.15)).frame(height: 4)
+                                    Capsule().fill(Color.green).frame(width: max(2, g.size.width * CGFloat(min(1.0, max(0.0, quotaFraction)))), height: 4)
+                                }
+                            }
+                            .frame(height: 4)
+                        } else {
+                            HStack(spacing: 4) {
+                                Image(systemName: "checkmark.seal.fill")
+                                    .foregroundColor(.green)
+                                    .font(.system(size: 10))
+                                Text("Pro Lifetime • Unlimited")
+                                    .font(.system(size: 10, weight: .semibold))
+                                    .foregroundColor(.secondary)
+                            }
+                            .padding(.top, 2)
+                        }
                     }
-                    .padding(12)
+                    .padding(10)
                     .background(Color(NSColor.controlBackgroundColor).opacity(0.6))
                     .cornerRadius(8)
                     .padding(10)
@@ -301,6 +324,36 @@ public struct SquirrelApp: App {
         case .dashboard, .treemap, .diagnostics, .readyToClean:
             return nil
         }
+    }
+
+    @ViewBuilder
+    private func sidebarRow(for section: NavigationSection) -> some View {
+        HStack {
+            Label {
+                Text(section.rawValue)
+                    .font(.system(size: 13, weight: .medium))
+            } icon: {
+                Image(systemName: section.iconName)
+                    .font(.system(size: 13))
+                    .foregroundColor(appState.selectedSection == section ? .accentColor : .secondary)
+            }
+
+            Spacer()
+
+            if let count = badgeCount(for: section), count > 0 {
+                Text("\(count)")
+                    .font(.system(size: 11, weight: .semibold).monospacedDigit())
+                    .foregroundColor(section == .permissions ? .orange : (section == .findings ? .blue : .secondary))
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill(section == .permissions ? Color.orange.opacity(0.15) : Color.secondary.opacity(0.12))
+                    )
+            }
+        }
+        .padding(.vertical, 1)
+        .tag(section)
     }
 }
 

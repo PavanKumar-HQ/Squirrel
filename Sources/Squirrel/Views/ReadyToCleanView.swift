@@ -67,7 +67,7 @@ public struct ReadyToCleanView: View {
         .alert(isPresented: $appState.showHubConfirmClean) {
             Alert(
                 title: Text("Clean \(formatted(summary.totalCleanableBytes))?"),
-                message: Text("Selected build artifacts, caches, and snapshots will be safely moved to macOS Trash or purged. This cannot be undone."),
+                message: Text("Selected build artifacts, caches, and temporary logs will be permanently deleted to immediately free up APFS storage. This cannot be undone."),
                 primaryButton: .destructive(Text("Clean \(formatted(summary.totalCleanableBytes))")) {
                     Task {
                         await appState.cleanSelectedHubItems()
