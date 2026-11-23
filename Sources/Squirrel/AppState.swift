@@ -66,6 +66,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     @Published public var readyToCleanSummary: ReadyToCleanSummary = ReadyToCleanSummary()
     @Published public var isAuditingHub: Bool = false
     @Published public var hubAuditProgress: String = ""
+    @Published public var hubSearchQuery: String = ""
     @Published public var expandedHubCategories: Set<CleanGroupCategory> = [.developerTools, .systemData]
     @Published public var showHubConfirmClean: Bool = false
     @Published public var showCleanSafelyConfirm: Bool = false
@@ -158,6 +159,13 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     @Published public var recentBenchmarkRecords: [ScanPerformanceRecord] = []
     @Published public var lastControlledBenchmark: BenchmarkComparison? = nil
     @Published public var currentProcessTelemetry: ProcessTelemetry = ProcessTelemetry()
+    @Published public var systemRAMMetrics: SystemRAMMetrics = SystemRAMMetrics()
+    @Published public var thermalMetrics: ThermalMetrics = ThermalMetrics()
+    @Published public var maintenanceTasks: [SystemOptimizationTask] = []
+    @Published public var isRunningMaintenance: Bool = false
+    @Published public var maintenanceProgress: String = ""
+    @Published public var lastMaintenanceResults: [SystemOptimizationResult] = []
+    @Published public var showMaintenanceSheet: Bool = false
     @Published public var isRunningBenchmark: Bool = false
     @Published public var benchmarkStatusText: String = ""
     public var lastScanDuration: TimeInterval = 0
@@ -181,6 +189,7 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         refreshFolderAccess()
         refreshTools()
         refreshSnapshots()
+        loadMaintenanceTasks()
     }
 
     public func refreshFolderAccess() {
@@ -238,8 +247,48 @@ public final class AppState: ObservableObject, @unchecked Sendable {
 
     public func refreshTelemetry() {
         self.currentProcessTelemetry = SystemTelemetry.captureCurrentProcessTelemetry()
+        self.systemRAMMetrics = SystemTelemetry.captureSystemRAMMetrics()
+        self.thermalMetrics = SystemTelemetry.captureThermalMetrics()
         self.recentBenchmarkRecords = BenchmarkManager.shared.getRecentRecords()
         self.lastControlledBenchmark = BenchmarkManager.shared.getLastBenchmarkComparison()
+    }
+
+    public func loadMaintenanceTasks() {
+        Task { @MainActor in
+            if self.maintenanceTasks.isEmpty {
+                self.maintenanceTasks = await SystemMaintenanceEngine.shared.availableTasks()
+            }
+        }
+    }
+
+    public func toggleMaintenanceTask(id: String) {
+        if let idx = maintenanceTasks.firstIndex(where: { $0.id == id }) {
+            maintenanceTasks[idx].isSelected.toggle()
+        }
+    }
+
+    public func selectAllMaintenanceTasks(selected: Bool) {
+        for i in 0..<maintenanceTasks.count {
+            maintenanceTasks[i].isSelected = selected
+        }
+    }
+
+    public func executeSystemMaintenance() {
+        Task { @MainActor in
+            guard !self.isRunningMaintenance else { return }
+            self.isRunningMaintenance = true
+            self.maintenanceProgress = "Starting system maintenance..."
+            let results = await SystemMaintenanceEngine.shared.executeOptimization(tasks: self.maintenanceTasks) { prog in
+                Task { @MainActor in
+                    self.maintenanceProgress = prog
+                }
+            }
+            self.lastMaintenanceResults = results
+            self.isRunningMaintenance = false
+            self.maintenanceProgress = ""
+            self.refreshTelemetry()
+            self.refreshVolumeMetrics()
+        }
     }
 
     // MARK: - Safe Scan Execution

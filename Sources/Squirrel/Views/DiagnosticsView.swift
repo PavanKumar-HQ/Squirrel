@@ -18,7 +18,7 @@ public struct DiagnosticsView: View {
                     VStack(alignment: .leading, spacing: 4) {
                         Text("Diagnostics & Efficiency")
                             .font(.system(size: 20, weight: .bold))
-                        Text("Live Darwin kernel telemetry, filesystem throughput benchmarks, and APFS verification metrics.")
+                        Text("Live Darwin kernel telemetry, hardware thermal sentinel, and APFS verification metrics.")
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
                     }
@@ -33,6 +33,50 @@ public struct DiagnosticsView: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
+
+                // Grid 0: Apple Silicon Thermal & System RAM Sentinel
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Image(systemName: "flame.circle.fill")
+                            .foregroundColor(appState.thermalMetrics.isCoolAndSafe ? .green : .orange)
+                        Text("Apple Silicon Hardware & Thermal Sentinel")
+                            .font(.system(size: 14, weight: .semibold))
+                        Spacer()
+                        Text("Darwin host_statistics64 & thermalState")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                    }
+
+                    LazyVGrid(columns: [GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible()), GridItem(.flexible())], spacing: 12) {
+                        telemetryCard(
+                            title: "Chassis Thermal State",
+                            value: appState.thermalMetrics.stateName,
+                            subtitle: appState.thermalMetrics.advice,
+                            systemImage: "thermometer.sun.fill"
+                        )
+                        telemetryCard(
+                            title: "System Memory Pressure",
+                            value: appState.systemRAMMetrics.memoryPressure,
+                            subtitle: "Kernel page reclamation level",
+                            systemImage: "speedometer"
+                        )
+                        telemetryCard(
+                            title: "Active + Wired RAM",
+                            value: ByteCountFormatter.string(fromByteCount: appState.systemRAMMetrics.activeBytes + appState.systemRAMMetrics.wiredBytes, countStyle: .memory),
+                            subtitle: "Wired: \(ByteCountFormatter.string(fromByteCount: appState.systemRAMMetrics.wiredBytes, countStyle: .memory))",
+                            systemImage: "memorychip"
+                        )
+                        telemetryCard(
+                            title: "Compressed + Free RAM",
+                            value: ByteCountFormatter.string(fromByteCount: appState.systemRAMMetrics.compressedBytes + appState.systemRAMMetrics.freeBytes, countStyle: .memory),
+                            subtitle: "Free: \(ByteCountFormatter.string(fromByteCount: appState.systemRAMMetrics.freeBytes, countStyle: .memory))",
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                    }
+                }
+                .padding(16)
+                .background(Color(NSColor.controlBackgroundColor))
+                .cornerRadius(10)
 
                 // Grid 1: Process Telemetry & Mach Kernel Resource Usage
                 VStack(alignment: .leading, spacing: 12) {

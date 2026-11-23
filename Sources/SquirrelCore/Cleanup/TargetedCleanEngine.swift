@@ -143,22 +143,32 @@ public actor TargetedCleanEngine {
             ("Homebrew Cache", "Library/Caches/Homebrew", "Homebrew bottled formulas and download tarballs")
         ]
 
-        for entry in devCachePaths {
+        let existingDevPaths = devCachePaths.compactMap { entry -> (name: String, path: String, desc: String)? in
             let fullURL = home.appendingPathComponent(entry.relPath)
-            if fileManager.fileExists(atPath: fullURL.path) {
-                let size = ProjectPurgeScanner.fastDirectorySize(at: fullURL.path)
-                if size > 1024 * 1024 { // Only include if > 1 MB
-                    let procCheck = safetyGuard.isApplicationRunning(forPath: fullURL.path)
-                    cleanableItems.append(CleanableItem(
+            return fileManager.fileExists(atPath: fullURL.path) ? (entry.name, fullURL.path, entry.desc) : nil
+        }
+
+        await withTaskGroup(of: CleanableItem?.self) { group in
+            for entry in existingDevPaths {
+                group.addTask {
+                    let size = ProjectPurgeScanner.fastDirectorySize(at: entry.path)
+                    guard size > 1024 * 1024 else { return nil }
+                    let procCheck = safetyGuard.isApplicationRunning(forPath: entry.path)
+                    return CleanableItem(
                         name: entry.name,
-                        path: fullURL.path,
+                        path: entry.path,
                         sizeBytes: size,
                         category: .developerTools,
                         detail: entry.desc,
                         isSelected: !procCheck.isRunning,
                         isProcessRunning: procCheck.isRunning,
                         activeProcessName: procCheck.appName
-                    ))
+                    )
+                }
+            }
+            for await item in group {
+                if let item = item {
+                    cleanableItems.append(item)
                 }
             }
         }
@@ -250,22 +260,32 @@ public actor TargetedCleanEngine {
             ("Vivaldi Service Workers", "Library/Application Support/Vivaldi/Default/Service Worker/CacheStorage", "Vivaldi offline service worker cache")
         ]
 
-        for sw in serviceWorkerPaths {
+        let existingSWPaths = serviceWorkerPaths.compactMap { sw -> (name: String, path: String, desc: String)? in
             let fullURL = home.appendingPathComponent(sw.relPath)
-            if fileManager.fileExists(atPath: fullURL.path) {
-                let size = ProjectPurgeScanner.fastDirectorySize(at: fullURL.path)
-                if size > 5 * 1024 * 1024 { // Only include if > 5 MB
-                    let procCheck = safetyGuard.isApplicationRunning(forPath: fullURL.path)
-                    cleanableItems.append(CleanableItem(
+            return fileManager.fileExists(atPath: fullURL.path) ? (sw.name, fullURL.path, sw.desc) : nil
+        }
+
+        await withTaskGroup(of: CleanableItem?.self) { group in
+            for sw in existingSWPaths {
+                group.addTask {
+                    let size = ProjectPurgeScanner.fastDirectorySize(at: sw.path)
+                    guard size > 5 * 1024 * 1024 else { return nil }
+                    let procCheck = safetyGuard.isApplicationRunning(forPath: sw.path)
+                    return CleanableItem(
                         name: sw.name,
-                        path: fullURL.path,
+                        path: sw.path,
                         sizeBytes: size,
                         category: .appCaches,
                         detail: sw.desc,
                         isSelected: !procCheck.isRunning,
                         isProcessRunning: procCheck.isRunning,
                         activeProcessName: procCheck.appName
-                    ))
+                    )
+                }
+            }
+            for await item in group {
+                if let item = item {
+                    cleanableItems.append(item)
                 }
             }
         }
@@ -289,22 +309,32 @@ public actor TargetedCleanEngine {
             ("QuickLook Thumbnails", "Library/Caches/com.apple.QuickLook.thumbnailcache", "System file preview thumbnail cache")
         ]
 
-        for entry in curatedAppCaches {
+        let existingAppCaches = curatedAppCaches.compactMap { entry -> (name: String, path: String, desc: String)? in
             let fullURL = home.appendingPathComponent(entry.relPath)
-            if fileManager.fileExists(atPath: fullURL.path) {
-                let size = ProjectPurgeScanner.fastDirectorySize(at: fullURL.path)
-                if size > 1024 * 1024 { // Only include if > 1 MB
-                    let procCheck = safetyGuard.isApplicationRunning(forPath: fullURL.path)
-                    cleanableItems.append(CleanableItem(
+            return fileManager.fileExists(atPath: fullURL.path) ? (entry.name, fullURL.path, entry.desc) : nil
+        }
+
+        await withTaskGroup(of: CleanableItem?.self) { group in
+            for entry in existingAppCaches {
+                group.addTask {
+                    let size = ProjectPurgeScanner.fastDirectorySize(at: entry.path)
+                    guard size > 1024 * 1024 else { return nil }
+                    let procCheck = safetyGuard.isApplicationRunning(forPath: entry.path)
+                    return CleanableItem(
                         name: entry.name,
-                        path: fullURL.path,
+                        path: entry.path,
                         sizeBytes: size,
                         category: .appCaches,
                         detail: entry.desc,
                         isSelected: !procCheck.isRunning,
                         isProcessRunning: procCheck.isRunning,
                         activeProcessName: procCheck.appName
-                    ))
+                    )
+                }
+            }
+            for await item in group {
+                if let item = item {
+                    cleanableItems.append(item)
                 }
             }
         }

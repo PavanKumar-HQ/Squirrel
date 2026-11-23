@@ -571,6 +571,36 @@ await runAsyncTest("Darwin Mach Kernel Process Telemetry") {
     assertTest(telemetry.userCPUTimeMicroseconds + telemetry.systemCPUTimeMicroseconds > 0, "Cumulative Mach thread CPU execution time is captured")
 }
 
+// Test 17b: System RAM & Thermal Sentinel Telemetry
+await runAsyncTest("Darwin Host RAM & Thermal Sentinel Telemetry") {
+    let ram = SystemTelemetry.captureSystemRAMMetrics()
+    assertTest(ram.totalPhysicalRAMBytes > 0, "Total physical RAM detected: \(ram.totalPhysicalRAMBytes / 1024 / 1024 / 1024) GB")
+    assertTest(ram.activeBytes + ram.wiredBytes > 0, "Active and wired RAM measured accurately")
+    assertTest(!ram.memoryPressure.isEmpty, "Memory pressure status determined: \(ram.memoryPressure)")
+
+    let thermal = SystemTelemetry.captureThermalMetrics()
+    assertTest(thermal.thermalStateRaw >= 0, "Apple Silicon thermal state captured: \(thermal.stateName)")
+    assertTest(!thermal.advice.isEmpty, "Thermal guidance provided: \(thermal.advice)")
+}
+
+// Test 17c: System Maintenance Engine & Optimization Catalog
+await runAsyncTest("System Maintenance Engine & Optimization Catalog") {
+    let engine = SystemMaintenanceEngine.shared
+    let tasks = await engine.availableTasks()
+    assertTest(tasks.count >= 5, "Discovered standard safe optimization tasks (found \(tasks.count))")
+    assertTest(tasks.contains { $0.id == "flush_dns" }, "Includes DNS flush task")
+    assertTest(tasks.contains { $0.id == "quicklook_cache" }, "Includes QuickLook rebuild task")
+    assertTest(tasks.contains { $0.id == "stale_app_states" }, "Includes stale app state cleanup task")
+    assertTest(tasks.contains { $0.id == "prevent_network_dsstore" }, "Includes .DS_Store suppression task")
+
+    // Run safe idempotent task
+    let results = await engine.executeOptimization(tasks: [
+        SystemOptimizationTask(id: "prevent_network_dsstore", title: "Disable .DS_Store", detail: "Test", iconName: "xmark")
+    ])
+    assertTest(results.count == 1, "Executed optimization task successfully")
+    assertTest(results.first?.succeeded == true, "Optimization task completed with success")
+}
+
 // Test 18: TOCTOU Revalidation & Symlink Mutation Defense
 await runAsyncTest("TOCTOU Immediate Revalidation Before Removal") {
     let toctouTarget = tempDir.appendingPathComponent("toctou_target.txt")

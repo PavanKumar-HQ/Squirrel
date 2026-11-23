@@ -1,4 +1,5 @@
 import SwiftUI
+import AppKit
 import SquirrelCore
 
 public struct ReadyToCleanView: View {
@@ -25,6 +26,9 @@ public struct ReadyToCleanView: View {
                     // Header Section
                     headerSection
 
+                    // Search & Quick Filter Bar
+                    searchBarSection
+
                     // 4 Clean Group Cards
                     VStack(spacing: 12) {
                         ForEach(CleanGroupCategory.allCases) { category in
@@ -45,6 +49,9 @@ public struct ReadyToCleanView: View {
             if summary.items.isEmpty && !appState.isAuditingHub {
                 appState.performHubAudit()
             }
+        }
+        .sheet(isPresented: $appState.showMaintenanceSheet) {
+            systemTuneUpSheet
         }
         .alert(isPresented: $appState.showHubConfirmClean) {
             Alert(
@@ -113,6 +120,25 @@ public struct ReadyToCleanView: View {
 
                 Spacer()
 
+                // System Tune-Up button (Porting Mole optimize)
+                Button {
+                    appState.showMaintenanceSheet = true
+                } label: {
+                    HStack(spacing: 5) {
+                        Image(systemName: "sparkles")
+                            .font(.system(size: 12))
+                        Text("Tune Up System")
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 5)
+                    .background(Color.accentColor.opacity(0.12))
+                    .foregroundColor(.accentColor)
+                    .cornerRadius(7)
+                }
+                .buttonStyle(.plain)
+                .help("Run safe macOS system optimization and maintenance tasks")
+
                 if appState.isAuditingHub {
                     HStack(spacing: 6) {
                         ProgressView()
@@ -169,13 +195,51 @@ public struct ReadyToCleanView: View {
         }
     }
 
+    // MARK: - Search Bar Section
+    private var searchBarSection: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+
+            TextField("Filter caches, developer tools, or apps (e.g., Chrome, Xcode, npm)...", text: $appState.hubSearchQuery)
+                .textFieldStyle(.plain)
+                .font(.system(size: 12))
+
+            if !appState.hubSearchQuery.isEmpty {
+                Button {
+                    appState.hubSearchQuery = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(Color(NSColor.controlBackgroundColor))
+        .cornerRadius(8)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.primary.opacity(0.08), lineWidth: 1)
+        )
+    }
+
     // MARK: - Category Card
     private func categoryCard(for category: CleanGroupCategory) -> some View {
-        let items = summary.items(for: category)
-        let totalBytes = summary.size(for: category)
+        let rawItems = summary.items(for: category)
+        let items = rawItems.filter { item in
+            if appState.hubSearchQuery.isEmpty { return true }
+            return item.name.localizedCaseInsensitiveContains(appState.hubSearchQuery) ||
+                   item.path.localizedCaseInsensitiveContains(appState.hubSearchQuery) ||
+                   item.detail.localizedCaseInsensitiveContains(appState.hubSearchQuery)
+        }
+        let totalBytes = rawItems.reduce(0) { $0 + $1.sizeBytes }
         let isExpanded = appState.expandedHubCategories.contains(category)
-        let allSelected = !items.isEmpty && items.allSatisfy { $0.isSelected }
-        let someSelected = items.contains { $0.isSelected }
+        let allSelected = !rawItems.isEmpty && rawItems.allSatisfy { $0.isSelected }
+        let someSelected = rawItems.contains { $0.isSelected }
 
         return VStack(spacing: 0) {
             // Main Category Row
@@ -189,7 +253,7 @@ public struct ReadyToCleanView: View {
                         .foregroundColor(allSelected || someSelected ? SquirrelTheme.brandWarm : .secondary.opacity(0.6))
                 }
                 .buttonStyle(.plain)
-                .disabled(items.isEmpty)
+                .disabled(rawItems.isEmpty)
 
                 // Category Title & Subtitle
                 VStack(alignment: .leading, spacing: 3) {
@@ -206,9 +270,9 @@ public struct ReadyToCleanView: View {
                 Spacer()
 
                 // Total Size
-                Text(items.isEmpty ? "Zero KB" : formatted(totalBytes))
+                Text(rawItems.isEmpty ? "Zero KB" : formatted(totalBytes))
                     .font(.system(size: 13, weight: .bold))
-                    .foregroundColor(items.isEmpty ? .secondary.opacity(0.5) : .primary)
+                    .foregroundColor(rawItems.isEmpty ? .secondary.opacity(0.5) : .primary)
 
                 // Expand/Collapse Chevron
                 Button {
@@ -224,7 +288,7 @@ public struct ReadyToCleanView: View {
                         .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.plain)
-                .disabled(items.isEmpty)
+                .disabled(rawItems.isEmpty)
             }
             .padding(.horizontal, 16)
             .padding(.vertical, 14)
@@ -284,6 +348,7 @@ public struct ReadyToCleanView: View {
                         .padding(.vertical, 1.5)
                         .background(Color.orange.opacity(0.12))
                         .cornerRadius(4)
+                        .help("This app is actively running. Cleaning is deferred to prevent data loss.")
                     }
                 }
 
@@ -295,6 +360,17 @@ public struct ReadyToCleanView: View {
             }
 
             Spacer()
+
+            // Reveal in Finder Button
+            Button {
+                NSWorkspace.shared.selectFile(item.path, inFileViewerRootedAtPath: "")
+            } label: {
+                Image(systemName: "arrow.up.forward.app")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary.opacity(0.8))
+            }
+            .buttonStyle(.plain)
+            .help("Reveal in Finder")
 
             Text(formatted(item.sizeBytes))
                 .font(.system(size: 11, weight: .semibold))
@@ -375,6 +451,122 @@ public struct ReadyToCleanView: View {
             Color(NSColor.windowBackgroundColor)
                 .shadow(color: Color.black.opacity(0.12), radius: 6, y: -2)
         )
+    }
+
+    // MARK: - System Tune-Up Sheet (Mole Optimize Port)
+    private var systemTuneUpSheet: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            HStack {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("System Tune-Up & Maintenance")
+                        .font(.system(size: 18, weight: .bold))
+                    Text("Safe macOS system optimization tasks to fix DNS, Finder previews, and clear old app window states.")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+                Button {
+                    appState.showMaintenanceSheet = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 16))
+                        .foregroundColor(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+
+            Divider()
+
+            VStack(spacing: 10) {
+                ForEach(appState.maintenanceTasks) { task in
+                    HStack(spacing: 12) {
+                        Button {
+                            appState.toggleMaintenanceTask(id: task.id)
+                        } label: {
+                            Image(systemName: task.isSelected ? "checkmark.square.fill" : "square")
+                                .font(.system(size: 15))
+                                .foregroundColor(task.isSelected ? .accentColor : .secondary)
+                        }
+                        .buttonStyle(.plain)
+
+                        Image(systemName: task.iconName)
+                            .font(.system(size: 14))
+                            .foregroundColor(.accentColor)
+                            .frame(width: 20)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(task.title)
+                                .font(.system(size: 12, weight: .semibold))
+                            Text(task.detail)
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        }
+                        Spacer()
+                    }
+                    .padding(10)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(8)
+                }
+            }
+
+            if appState.isRunningMaintenance {
+                HStack(spacing: 8) {
+                    ProgressView()
+                        .scaleEffect(0.8)
+                    Text(appState.maintenanceProgress)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+                .padding(.vertical, 4)
+            }
+
+            if !appState.lastMaintenanceResults.isEmpty {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Maintenance Results:")
+                        .font(.system(size: 11, weight: .bold))
+                    ForEach(appState.lastMaintenanceResults) { res in
+                        HStack(spacing: 6) {
+                            Image(systemName: res.succeeded ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                                .foregroundColor(res.succeeded ? .green : .orange)
+                                .font(.system(size: 10))
+                            Text("\(res.taskTitle): \(res.message)")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                }
+                .padding(8)
+                .background(Color.green.opacity(0.06))
+                .cornerRadius(6)
+            }
+
+            HStack {
+                Button("Select All") {
+                    appState.selectAllMaintenanceTasks(selected: true)
+                }
+                .buttonStyle(.plain)
+                .font(.system(size: 11))
+                .foregroundColor(.accentColor)
+
+                Spacer()
+
+                Button {
+                    appState.executeSystemMaintenance()
+                } label: {
+                    Text("Run Selected Optimizations")
+                        .font(.system(size: 12, weight: .bold))
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 7)
+                        .background(Color.accentColor)
+                        .foregroundColor(.white)
+                        .cornerRadius(6)
+                }
+                .buttonStyle(.plain)
+                .disabled(appState.isRunningMaintenance || !appState.maintenanceTasks.contains(where: { $0.isSelected }))
+            }
+        }
+        .padding(24)
+        .frame(minWidth: 540)
     }
 
     private func formatted(_ bytes: Int64) -> String {
