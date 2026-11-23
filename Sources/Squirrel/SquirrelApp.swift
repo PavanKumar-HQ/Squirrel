@@ -159,6 +159,8 @@ public struct SquirrelApp: App {
                     switch appState.selectedSection {
                     case .readyToClean:
                         ReadyToCleanView(appState: appState)
+                    case .activePorts:
+                        ActivePortsView(appState: appState)
                     case .dashboard:
                         DashboardView(appState: appState)
                     case .findings:
@@ -270,6 +272,9 @@ public struct SquirrelApp: App {
             return appState.localSnapshots.isEmpty ? nil : appState.localSnapshots.count
         case .history:
             return appState.quarantineRecords.isEmpty ? nil : appState.quarantineRecords.count
+        case .activePorts:
+            let devCount = appState.listeningPorts.filter { $0.isDevServer }.count
+            return devCount == 0 ? nil : devCount
         case .dashboard, .treemap, .diagnostics, .readyToClean:
             return nil
         }

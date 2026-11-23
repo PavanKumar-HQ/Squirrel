@@ -12,6 +12,7 @@ public enum ScanStatus: String, Sendable {
 
 public enum NavigationSection: String, CaseIterable, Identifiable {
     case readyToClean = "Ready to Clean"
+    case activePorts = "Active Ports & Servers"
     case dashboard = "Dashboard"
     case findings = "Findings"
     case treemap = "Storage Treemap"
@@ -29,6 +30,7 @@ public enum NavigationSection: String, CaseIterable, Identifiable {
     public var iconName: String {
         switch self {
         case .readyToClean: return "sparkles"
+        case .activePorts: return "network"
         case .dashboard: return "gauge.with.needle"
         case .findings: return "checklist"
         case .treemap: return "square.grid.3x3"
@@ -160,6 +162,11 @@ public final class AppState: ObservableObject, @unchecked Sendable {
     @Published public var isRefreshingSnapshots: Bool = false
     @Published public var deletingSnapshotName: String? = nil
     @Published public var showConfirmDeleteAllSnapshots: Bool = false
+
+    // Active Ports & Dev Servers State
+    @Published public var listeningPorts: [ListeningPortRecord] = []
+    @Published public var isLoadingPorts: Bool = false
+    @Published public var portActionMessage: String? = nil
 
     // History and Quarantine
     @Published public var journalEntries: [JournalEntry] = []
@@ -826,6 +833,26 @@ public final class AppState: ObservableObject, @unchecked Sendable {
         await MainActor.run {
             self.discoveredProjects.removeAll { paths.contains($0.projectPath) }
             self.refreshVolumeMetrics()
+        }
+    }
+
+    // MARK: - Active Ports & Dev Servers Management
+
+    public func refreshListeningPorts() {
+        Task { @MainActor in
+            self.isLoadingPorts = true
+            let ports = await ServerPortManager.shared.listListeningPorts()
+            self.listeningPorts = ports
+            self.isLoadingPorts = false
+        }
+    }
+
+    public func terminateListeningPort(_ port: ListeningPortRecord) {
+        Task { @MainActor in
+            let outcome = await ServerPortManager.shared.terminateProcess(pid: port.pid, command: port.command)
+            self.portActionMessage = outcome.message
+            // Refresh port list after termination
+            self.refreshListeningPorts()
         }
     }
 

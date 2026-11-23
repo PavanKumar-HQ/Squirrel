@@ -48,12 +48,16 @@ public struct ProjectPurgeView: View {
                 }
                 Spacer()
 
-                Button {
-                    appState.scanProjects()
-                } label: {
-                    Label(appState.isScanningProjects ? "Scanning Repos..." : "Scan Repositories", systemImage: "arrow.clockwise")
+                if appState.isScanningProjects {
+                    DevMoonScanningView(subtitle: appState.projectScanProgressText.isEmpty ? "Scanning Repositories..." : appState.projectScanProgressText)
+                } else {
+                    Button {
+                        appState.scanProjects()
+                    } label: {
+                        Label("Scan Repositories", systemImage: "arrow.clockwise")
+                    }
+                    .disabled(appState.isPurgingProjects)
                 }
-                .disabled(appState.isScanningProjects || appState.isPurgingProjects)
 
                 if !appState.selectedProjectPaths.isEmpty {
                     Button(role: .destructive) {

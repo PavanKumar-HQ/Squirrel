@@ -115,73 +115,82 @@ public struct ReadyToCleanView: View {
     private var headerSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .center) {
-                Text("Ready to clean")
-                    .font(.system(size: 26, weight: .bold))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Ready to clean")
+                        .font(.system(size: 24, weight: .bold))
+
+                    HStack(spacing: 8) {
+                        let cleanableStr = formatted(summary.totalCleanableBytes)
+                        let availableStr = formatted(appState.volumeSpace.availableCapacity + summary.totalCleanableBytes)
+
+                        Text("\(cleanableStr) cleanable")
+                            .fontWeight(.bold)
+                            .foregroundColor(.primary)
+
+                        Text("•")
+                            .foregroundColor(.secondary.opacity(0.6))
+
+                        Text("\(availableStr) available after")
+                            .foregroundColor(.secondary)
+                    }
+                    .font(.system(size: 13))
+                }
 
                 Spacer()
 
-                // System Tune-Up button (Porting Mole optimize)
-                Button {
-                    appState.showMaintenanceSheet = true
-                } label: {
-                    HStack(spacing: 5) {
-                        Image(systemName: "sparkles")
-                            .font(.system(size: 12))
-                        Text("Tune Up System")
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 5)
-                    .background(Color.accentColor.opacity(0.12))
-                    .foregroundColor(.accentColor)
-                    .cornerRadius(7)
-                }
-                .buttonStyle(.plain)
-                .help("Run safe macOS system optimization and maintenance tasks")
-
                 if appState.isAuditingHub {
-                    HStack(spacing: 6) {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                        Text(appState.hubAuditProgress)
-                            .font(.system(size: 11))
-                            .foregroundColor(.secondary)
+                    HStack(spacing: 12) {
+                        ScanningGlobeView(subtitle: appState.hubAuditProgress.isEmpty ? "Auditing system..." : appState.hubAuditProgress)
                     }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .cornerRadius(10)
                 } else {
-                    Button {
-                        appState.performHubAudit()
-                    } label: {
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(.secondary)
+                    HStack(spacing: 8) {
+                        // System Tune-Up button (Porting Mole optimize)
+                        Button {
+                            appState.showMaintenanceSheet = true
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "sparkles")
+                                    .font(.system(size: 12))
+                                Text("Tune Up")
+                                    .font(.system(size: 12, weight: .semibold))
+                            }
+                            .padding(.horizontal, 11)
+                            .padding(.vertical, 6)
+                            .background(Color.accentColor.opacity(0.12))
+                            .foregroundColor(.accentColor)
+                            .cornerRadius(8)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Run safe macOS system optimization and maintenance tasks")
+
+                        Button {
+                            appState.performHubAudit()
+                        } label: {
+                            Image(systemName: "arrow.clockwise")
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(.secondary)
+                                .frame(width: 28, height: 28)
+                                .background(Color(NSColor.controlBackgroundColor))
+                                .cornerRadius(7)
+                        }
+                        .buttonStyle(.plain)
+                        .help("Rescan categories")
                     }
-                    .buttonStyle(.plain)
-                    .help("Rescan categories")
                 }
             }
 
-            HStack(spacing: 6) {
-                let cleanableStr = formatted(summary.totalCleanableBytes)
-                let availableStr = formatted(appState.volumeSpace.availableCapacity + summary.totalCleanableBytes)
-
-                Text("\(cleanableStr) cleanable")
-                    .fontWeight(.semibold)
-                    .foregroundColor(.primary)
-
-                Text("·")
-                    .foregroundColor(.secondary)
-
-                Text("\(availableStr) free after")
-                    .foregroundColor(.secondary)
-
-                if !summary.hasFullDiskAccess {
-                    Text("·")
+            if !summary.hasFullDiskAccess {
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11))
+                        .foregroundColor(.orange)
+                    Text("Some system caches were skipped.")
                         .foregroundColor(.secondary)
-
-                    Text("Some caches were skipped")
-                        .foregroundColor(.secondary)
-
-                    Button("Enable Disk Access") {
+                    Button("Enable Full Disk Access") {
                         if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
                             NSWorkspace.shared.open(url)
                         }
@@ -190,8 +199,9 @@ public struct ReadyToCleanView: View {
                     .foregroundColor(SquirrelTheme.brandWarm)
                     .underline()
                 }
+                .font(.system(size: 11))
+                .padding(.top, 2)
             }
-            .font(.system(size: 13))
         }
     }
 
@@ -255,23 +265,30 @@ public struct ReadyToCleanView: View {
                 .buttonStyle(.plain)
                 .disabled(rawItems.isEmpty)
 
-                // Category Title & Subtitle
+                // Category Title & Subtitle with fixed line limit to avoid clutter
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(category.rawValue)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.primary)
+                    HStack(spacing: 6) {
+                        Image(systemName: category.iconName)
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+
+                        Text(category.rawValue)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.primary)
+                    }
 
                     Text(category.subtitle)
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
                 }
 
                 Spacer()
 
                 // Total Size
                 Text(rawItems.isEmpty ? "Zero KB" : formatted(totalBytes))
-                    .font(.system(size: 13, weight: .bold))
+                    .font(.system(size: 13, weight: .bold, design: .monospaced))
                     .foregroundColor(rawItems.isEmpty ? .secondary.opacity(0.5) : .primary)
 
                 // Expand/Collapse Chevron
@@ -283,15 +300,17 @@ public struct ReadyToCleanView: View {
                     }
                 } label: {
                     Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(.secondary)
-                        .frame(width: 20, height: 20)
+                        .frame(width: 22, height: 22)
+                        .background(Color.primary.opacity(0.04))
+                        .cornerRadius(6)
                 }
                 .buttonStyle(.plain)
                 .disabled(rawItems.isEmpty)
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 14)
+            .padding(.vertical, 12)
 
             // Expanded Items List
             if isExpanded && !items.isEmpty {
@@ -303,7 +322,7 @@ public struct ReadyToCleanView: View {
                         itemRow(for: item)
                     }
                 }
-                .padding(.vertical, 6)
+                .padding(.vertical, 4)
                 .background(Color.primary.opacity(0.02))
             }
         }
@@ -334,6 +353,7 @@ public struct ReadyToCleanView: View {
                     Text(item.name)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.primary)
+                        .lineLimit(1)
 
                     if item.isProcessRunning {
                         HStack(spacing: 3) {
@@ -354,7 +374,7 @@ public struct ReadyToCleanView: View {
 
                 Text(item.path)
                     .font(.system(size: 10, design: .monospaced))
-                    .foregroundColor(.secondary)
+                    .foregroundColor(.secondary.opacity(0.8))
                     .lineLimit(1)
                     .truncationMode(.middle)
             }
@@ -373,11 +393,11 @@ public struct ReadyToCleanView: View {
             .help("Reveal in Finder")
 
             Text(formatted(item.sizeBytes))
-                .font(.system(size: 11, weight: .semibold))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
                 .foregroundColor(.secondary)
         }
-        .padding(.horizontal, 24)
-        .padding(.vertical, 8)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 6)
     }
 
     // MARK: - Bottom Action Bar
